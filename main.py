@@ -62,6 +62,7 @@ from publish_logger import (
     generate_correlation_id,
     PublishEventLogger,
     SecretMaskingFilter,
+    SecretMaskingFormatter,
 )
 
 # ─── Logging ─────────────────────────────────────────────────
@@ -71,8 +72,13 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
-# Apply secret masking to all log output
+# Apply secret masking to all log output (formatter covers tracebacks too)
+_masking_formatter = SecretMaskingFormatter(
+    fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 for _handler in logging.root.handlers:
+    _handler.setFormatter(_masking_formatter)
     _handler.addFilter(SecretMaskingFilter())
 logger = logging.getLogger("social-publisher")
 

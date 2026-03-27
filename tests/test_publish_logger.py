@@ -13,6 +13,7 @@ from publish_logger import (
     generate_correlation_id,
     PublishEventLogger,
     SecretMaskingFilter,
+    SecretMaskingFormatter,
     mask_secrets,
 )
 
@@ -232,3 +233,41 @@ class TestSecretMaskingFilter:
             msg="test", args=None, exc_info=None,
         )
         assert filt.filter(record) is True
+
+
+class TestSecretMaskingFormatter:
+    def test_formatter_masks_traceback(self):
+        """Secrets in exception tracebacks must be masked."""
+        formatter = SecretMaskingFormatter(fmt="%(message)s")
+        token = "EAABsbCS1iZAZABCDEF1234567890abcdef"
+        try:
+            raise ValueError(f"API call failed with token {token}")
+        except ValueError:
+            import sys
+            exc_info = sys.exc_info()
+
+        record = logging.LogRecord(
+            name="test", level=logging.ERROR, pathname="", lineno=0,
+            msg="Error occurred", args=None, exc_info=exc_info,
+        )
+        output = formatter.format(record)
+        assert token not in output
+        assert "***REDACTED***" in output
+        # The main message should still be there
+        assert "Error occurred" in output
+
+    def test_formatter_preserves_safe_traceback(self):
+        """Tracebacks without secrets should pass through unchanged."""
+        formatter = SecretMaskingFormatter(fmt="%(message)s")
+        try:
+            raise ValueError("something went wrong")
+        except ValueError:
+            import sys
+            exc_info = sys.exc_info()
+
+        record = logging.LogRecord(
+            name="test", level=logging.ERROR, pathname="", lineno=0,
+            msg="Error", args=None, exc_info=exc_info,
+        )
+        output = formatter.format(record)
+        assert "something went wrong" in output

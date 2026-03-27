@@ -213,7 +213,7 @@ def mask_secrets(text: str) -> str:
 
 
 class SecretMaskingFilter(logging.Filter):
-    """Logging filter that masks secrets in log messages."""
+    """Logging filter that masks secrets in log messages and args."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.msg, str):
@@ -228,3 +228,11 @@ class SecretMaskingFilter(logging.Filter):
                     for a in record.args
                 )
         return True
+
+
+class SecretMaskingFormatter(logging.Formatter):
+    """Formatter that masks secrets in the final output, including tracebacks."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        output = super().format(record)
+        return mask_secrets(output)

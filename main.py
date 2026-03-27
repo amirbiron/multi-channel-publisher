@@ -226,10 +226,16 @@ def process_row(
             _mark_error(header, sheet_row_number, error_msg)
             return True
 
-        # Log channel-level blocks
+        # Log channel-level validation results
         for cid, issues in report.blocked_channels.items():
             for issue in issues:
                 logger.warning(f"Row {row_id}: {cid} blocked — [{issue.code}] {issue.message}")
+            event_logger.log_validation(
+                cid, passed=False,
+                errors=[f"[{i.code}] {i.message}" for i in issues],
+            )
+        for cid in report.approved_channels:
+            event_logger.log_validation(cid, passed=True)
 
         targets = report.approved_channels
         skipped_channels = report.skipped_channels

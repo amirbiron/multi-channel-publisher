@@ -1,94 +1,94 @@
-# Deployment Checklist — Multi-Channel Publisher (GBP Rollout)
+# צ׳קליסט דיפלוי — Multi-Channel Publisher (עליית GBP)
 
-## Pre-Deployment
+## לפני דיפלוי
 
-### Environment Variables
-- [ ] `GBP_ACCOUNT_ID` set (e.g. `accounts/123456789`)
-- [ ] `GBP_OAUTH_CLIENT_ID` set
-- [ ] `GBP_OAUTH_CLIENT_SECRET` set
-- [ ] `GBP_REFRESH_TOKEN` set and valid
-- [ ] `GBP_ENABLED` set to `false` (feature flag — start disabled)
-- [ ] Google Cloud project approved for GBP API access
-- [ ] OAuth scopes include `business.manage`
+### משתני סביבה
+- [ ] `GBP_ACCOUNT_ID` מוגדר (למשל `accounts/123456789`)
+- [ ] `GBP_OAUTH_CLIENT_ID` מוגדר
+- [ ] `GBP_OAUTH_CLIENT_SECRET` מוגדר
+- [ ] `GBP_REFRESH_TOKEN` מוגדר ותקף
+- [ ] `GBP_ENABLED` מוגדר ל-`false` (feature flag — מתחילים כבוי)
+- [ ] פרויקט Google Cloud מאושר לגישה ל-GBP API
+- [ ] OAuth scopes כוללים `business.manage`
 
 ### Google Sheets
-- [ ] New columns added to sheet: `caption`, `caption_gbp`, `gbp_post_type`, `cta_type`, `cta_url`, `google_location_id`, `source`, `locked_at`, `processing_by`, `retry_count`, `published_channels`, `failed_channels`
-- [ ] Existing IG/FB rows still parse correctly (backward compatible)
-- [ ] Column order matches `SHEET_COLUMNS` in `config_constants.py`
+- [ ] עמודות חדשות נוספו לגיליון: `caption`, `caption_gbp`, `gbp_post_type`, `cta_type`, `cta_url`, `google_location_id`, `source`, `locked_at`, `processing_by`, `retry_count`, `published_channels`, `failed_channels`
+- [ ] שורות IG/FB קיימות ממשיכות לעבוד (תאימות לאחור)
+- [ ] סדר העמודות תואם ל-`SHEET_COLUMNS` ב-`config_constants.py`
 
-### Code Review
-- [ ] All new files reviewed: `channels/google_business.py`, `channels/google_auth.py`, `channels/google_locations.py`, `validator.py`
-- [ ] No hardcoded credentials or tokens in code
-- [ ] Error messages don't leak sensitive data (tokens, secrets)
-- [ ] `LOCK_TIMEOUT_MINUTES` set appropriately (default: 10)
+### קוד ריוויו
+- [ ] כל הקבצים החדשים נבדקו: `channels/google_business.py`, `channels/google_auth.py`, `channels/google_locations.py`, `validator.py`
+- [ ] אין credentials או טוקנים hardcoded בקוד
+- [ ] הודעות שגיאה לא מדליפות מידע רגיש (טוקנים, סודות)
+- [ ] `LOCK_TIMEOUT_MINUTES` מוגדר כראוי (ברירת מחדל: 10)
 
-### Testing
-- [ ] All unit tests pass (`pytest tests/test_unit_core.py`)
-- [ ] All E2E scenario tests pass (`pytest tests/test_e2e_scenarios.py`)
-- [ ] All existing tests pass — full regression (`pytest`)
-- [ ] Manual smoke test: IG-only post still works
-- [ ] Manual smoke test: FB-only post still works
-- [ ] Manual smoke test: IG+FB post still works
-
----
-
-## Rollout (Phased)
-
-### Phase 1: Feature Flag OFF (deploy code only)
-- [ ] Deploy with `GBP_ENABLED=false`
-- [ ] Verify IG/FB publishing works normally (no regression)
-- [ ] Verify GBP channel is NOT registered when flag is off
-- [ ] Monitor logs for any errors related to new code paths
-- [ ] Wait 24h with no issues
-
-### Phase 2: GBP Internal Testing
-- [ ] Set `GBP_ENABLED=true`
-- [ ] Create a test GBP-only post with `google_location_id`
-- [ ] Verify GBP text-only post publishes successfully
-- [ ] Verify GBP text+image post publishes successfully
-- [ ] Verify GBP post appears on Google Business Profile
-- [ ] Verify CTA (if used) renders correctly
-
-### Phase 3: Mixed Channel Testing
-- [ ] Create IG+GBP post → verify both publish
-- [ ] Create IG+FB+GBP post → verify all three publish
-- [ ] Simulate GBP failure (invalid location) → verify PARTIAL status
-- [ ] Verify retry for PARTIAL GBP → only GBP retried, not IG/FB
-- [ ] Verify Telegram notifications for PARTIAL/ERROR
-
-### Phase 4: Production
-- [ ] Enable for real customer posts
-- [ ] Monitor first 10 GBP posts for success rate
-- [ ] Verify lock recovery works for stuck PROCESSING rows
-- [ ] Confirm Cloudinary cleanup handles PARTIAL rows
+### בדיקות
+- [ ] כל הטסטים היחידתיים עוברים (`pytest tests/test_unit_core.py`)
+- [ ] כל תרחישי ה-E2E עוברים (`pytest tests/test_e2e_scenarios.py`)
+- [ ] כל הטסטים הקיימים עוברים — רגרסיה מלאה (`pytest`)
+- [ ] בדיקת עשן ידנית: פוסט IG בלבד עדיין עובד
+- [ ] בדיקת עשן ידנית: פוסט FB בלבד עדיין עובד
+- [ ] בדיקת עשן ידנית: פוסט IG+FB עדיין עובד
 
 ---
 
-## Post-Deployment Monitoring
+## עלייה לאוויר (בשלבים)
 
-### First 48 Hours
-- [ ] Check logs for GBP API errors (rate limits, auth failures)
-- [ ] Verify no duplicate publishes (lock mechanism working)
-- [ ] Monitor retry_count — rows with count > 3 need investigation
-- [ ] Check Telegram alerts are firing for GBP errors
+### שלב 1: Feature Flag כבוי (דיפלוי קוד בלבד)
+- [ ] דיפלוי עם `GBP_ENABLED=false`
+- [ ] אימות שפרסום IG/FB עובד כרגיל (אין רגרסיה)
+- [ ] אימות שערוץ GBP לא רשום כשהפלאג כבוי
+- [ ] מעקב אחרי לוגים — בדיקה שאין שגיאות מנתיבי קוד חדשים
+- [ ] המתנה 24 שעות בלי בעיות
 
-### Ongoing
-- [ ] GBP OAuth token refresh working (check every 7 days)
-- [ ] API quota not exceeded (check Google Cloud Console)
-- [ ] PROCESSING rows not accumulating (lock timeout recovery)
+### שלב 2: בדיקה פנימית של GBP
+- [ ] הגדרת `GBP_ENABLED=true`
+- [ ] יצירת פוסט GBP לבדיקה עם `google_location_id`
+- [ ] אימות שפוסט GBP טקסט בלבד מתפרסם בהצלחה
+- [ ] אימות שפוסט GBP טקסט + תמונה מתפרסם בהצלחה
+- [ ] אימות שהפוסט מופיע ב-Google Business Profile
+- [ ] אימות ש-CTA (אם בשימוש) מוצג נכון
+
+### שלב 3: בדיקת ערוצים מעורבים
+- [ ] יצירת פוסט IG+GBP ← אימות ששניהם מתפרסמים
+- [ ] יצירת פוסט IG+FB+GBP ← אימות ששלושתם מתפרסמים
+- [ ] סימולציית כשל GBP (מיקום לא תקין) ← אימות סטטוס PARTIAL
+- [ ] אימות retry ל-GBP בלבד ← רק GBP נשלח מחדש, לא IG/FB
+- [ ] אימות התראות טלגרם ל-PARTIAL/ERROR
+
+### שלב 4: פרודקשן
+- [ ] הפעלה עבור פוסטים אמיתיים של לקוחות
+- [ ] מעקב אחרי 10 הפוסטים הראשונים ב-GBP — אחוז הצלחה
+- [ ] אימות ששחרור נעילות עובד לשורות PROCESSING תקועות
+- [ ] אימות שניקוי Cloudinary מטפל בשורות PARTIAL
 
 ---
 
-## Rollback Plan
+## מוניטורינג אחרי דיפלוי
 
-If issues are found:
+### 48 שעות ראשונות
+- [ ] בדיקת לוגים לשגיאות GBP API (rate limits, כשלי auth)
+- [ ] אימות שאין פרסומים כפולים (מנגנון נעילה עובד)
+- [ ] מעקב אחרי retry_count — שורות עם ספירה מעל 3 דורשות בדיקה
+- [ ] בדיקה שהתראות טלגרם נשלחות על שגיאות GBP
 
-1. **Quick rollback**: Set `GBP_ENABLED=false` → GBP channel deregistered, IG/FB unaffected
-2. **Full rollback**: Revert to previous deployment — all IG/FB rows continue working
-3. **Partial fix**: If only GBP has issues, rows with `network=IG+FB` are unaffected
+### שוטף
+- [ ] רענון OAuth token של GBP עובד (בדיקה כל 7 ימים)
+- [ ] מכסת API לא נחרגת (בדיקה ב-Google Cloud Console)
+- [ ] שורות PROCESSING לא מצטברות (שחרור נעילות timeout)
 
-### Rollback indicators:
-- GBP API returning persistent 4xx errors
-- OAuth token refresh failing repeatedly
-- Lock recovery loop (rows cycling PROCESSING → READY → PROCESSING)
-- IG/FB regression (any failure in existing channels = immediate rollback)
+---
+
+## תוכנית Rollback
+
+אם מתגלות בעיות:
+
+1. **Rollback מהיר**: הגדרת `GBP_ENABLED=false` ← ערוץ GBP מוסר, IG/FB לא מושפעים
+2. **Rollback מלא**: חזרה לדיפלוי הקודם — כל שורות IG/FB ממשיכות לעבוד
+3. **תיקון חלקי**: אם רק ל-GBP יש בעיות, שורות עם `network=IG+FB` לא מושפעות
+
+### אינדיקטורים ל-rollback:
+- GBP API מחזיר שגיאות 4xx מתמשכות
+- רענון OAuth token נכשל שוב ושוב
+- לולאת שחרור נעילות (שורות מתחלפות בין PROCESSING ← READY ← PROCESSING)
+- רגרסיה ב-IG/FB (כל כשל בערוצים קיימים = rollback מיידי)

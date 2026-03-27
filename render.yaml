@@ -1,0 +1,88 @@
+# ═══════════════════════════════════════════════════════════════
+#  render.yaml — Render Blueprint (Cron Job)
+#  https://render.com/docs/blueprint-spec
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  # ─── Web Panel ───────────────────────────────────────────────
+  - type: web
+    name: social-publisher-panel
+    runtime: docker
+    dockerfilePath: ./Dockerfile.web
+    region: frankfurt
+    plan: starter
+    envVars:
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: SPREADSHEET_ID
+        sync: false
+      - key: SHEET_NAME
+        value: Sheet1
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: META_API_VERSION
+        value: v21.0
+      - key: IG_USER_ID
+        sync: false
+      - key: IG_ACCESS_TOKEN
+        sync: false
+      - key: FB_PAGE_ID
+        sync: false
+      - key: FB_PAGE_ACCESS_TOKEN
+        sync: false
+      - key: GOOGLE_DRIVE_FOLDER_ID
+        sync: false
+      - key: WEB_PANEL_SECRET
+        sync: false
+      - key: WEB_PANEL_DEV_SECRET
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+
+  # ─── Cron Job (Publisher) ────────────────────────────────────
+  - type: cron
+    name: social-publisher
+    runtime: docker
+    schedule: "*/5 * * * *"   # כל דקה (UTC) — אפשר לשנות ל-*/5 לחיסכון
+    dockerfilePath: ./Dockerfile
+    region: frankfurt           # הכי קרוב לישראל
+    plan: starter               # שנה לפי צורך
+    envVars:
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: SPREADSHEET_ID
+        sync: false
+      - key: SHEET_NAME
+        value: Sheet1
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: CLOUDINARY_RETENTION_DAYS
+        value: "10"
+      - key: META_API_VERSION
+        value: v21.0
+      - key: IG_USER_ID
+        sync: false
+      - key: IG_ACCESS_TOKEN
+        sync: false
+      - key: FB_PAGE_ID
+        sync: false
+      - key: FB_PAGE_ACCESS_TOKEN
+        sync: false
+      - key: PUBLISH_MAX_RETRIES
+        value: "3"
+      - key: PUBLISH_RETRY_DELAY
+        value: "5"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false

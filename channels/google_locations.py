@@ -19,8 +19,8 @@ from channels.google_auth import GoogleOAuthManager, get_oauth_manager
 
 logger = logging.getLogger(__name__)
 
-# GBP (My Business) API base
-_GBP_API_BASE = "https://mybusiness.googleapis.com/v4"
+# GBP Business Profile API base (v1 — replaces deprecated mybusiness.googleapis.com/v4)
+_GBP_API_BASE = "https://mybusinessbusinessinformation.googleapis.com/v1"
 
 # Default cache TTL in seconds (5 minutes)
 _CACHE_TTL_SECONDS = 300
@@ -94,9 +94,9 @@ class GoogleLocationsService:
         Each location dict contains at least::
 
             {
-                "name": "accounts/123/locations/456",
-                "locationName": "My Business — Downtown",
-                "address": { ... },
+                "name": "locations/456",
+                "title": "My Business — Downtown",
+                "storefrontAddress": { ... },
                 ...
             }
         """
@@ -115,10 +115,6 @@ class GoogleLocationsService:
         """
         Return a single location by its resource name (e.g. ``locations/456``),
         or ``None`` if not found among accessible locations.
-
-        The *location_id* can be either:
-        - a full name: ``accounts/123/locations/456``
-        - a short name: ``locations/456``
         """
         locations = self.list_locations()
         for loc in locations:
@@ -126,7 +122,7 @@ class GoogleLocationsService:
                 return loc
         return None
 
-    def validate_location_access(self, location_id: str) -> dict:
+    def validate_location_access(self, location_id: str | None) -> dict:
         """
         Verify that *location_id* is among the accessible locations.
 
@@ -161,7 +157,9 @@ class GoogleLocationsService:
         page_token: str | None = None
 
         while True:
-            params: dict[str, str] = {}
+            params: dict[str, str] = {
+                "readMask": "name,title,storefrontAddress",
+            }
             if page_token:
                 params["pageToken"] = page_token
 
@@ -193,17 +191,8 @@ class GoogleLocationsService:
 
     @staticmethod
     def _matches(full_name: str, location_id: str) -> bool:
-        """
-        Check whether *location_id* matches *full_name*.
-
-        Supports both ``accounts/X/locations/Y`` and ``locations/Y``.
-        """
-        if full_name == location_id:
-            return True
-        # Allow only the "locations/Y" short form
-        if location_id.startswith("locations/") and full_name.endswith("/" + location_id):
-            return True
-        return False
+        """Check whether *location_id* matches *full_name*."""
+        return full_name == location_id
 
 
 class LocationAccessError(Exception):

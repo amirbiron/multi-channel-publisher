@@ -514,18 +514,23 @@ function toggleManualLocationId() {
   }
 }
 
-// Pending location ID to select once the dropdown loads
-let _pendingLocationId = '';
+// Location loading: use a request counter to handle concurrent calls.
+// Only the latest call applies its result, stale responses are ignored.
+let _locationRequestId = 0;
 
 async function loadGbpLocations(selectLocationId = '') {
-  _pendingLocationId = selectLocationId;
+  const requestId = ++_locationRequestId;
   const select = document.getElementById('form-google-location-id');
   const manual = document.getElementById('form-google-location-id-manual');
   try {
     const resp = await fetch('/api/gbp/locations');
     const data = await resp.json();
+
+    // Stale response — a newer call was made while this one was in flight
+    if (requestId !== _locationRequestId) return;
+
     if (data.error || !data.locations) {
-      _applyLocationFallback(select, manual);
+      _applyLocationFallback(select, manual, selectLocationId);
       return;
     }
 
@@ -538,34 +543,34 @@ async function loadGbpLocations(selectLocationId = '') {
       select.appendChild(opt);
     });
 
-    // Apply the pending location selection now that options are loaded
-    if (_pendingLocationId) {
-      const optionExists = Array.from(select.options).some(o => o.value === _pendingLocationId);
+    // Apply the location selection now that options are loaded
+    if (selectLocationId) {
+      const optionExists = Array.from(select.options).some(o => o.value === selectLocationId);
       if (optionExists) {
-        select.value = _pendingLocationId;
+        select.value = selectLocationId;
         manual.value = '';
         manual.classList.add('hidden');
       } else {
         select.value = '';
-        manual.value = _pendingLocationId;
+        manual.value = selectLocationId;
         manual.classList.remove('hidden');
       }
-      _pendingLocationId = '';
     }
   } catch (e) {
     console.error('Failed to load GBP locations:', e);
-    _applyLocationFallback(select, manual);
+    if (requestId === _locationRequestId) {
+      _applyLocationFallback(select, manual, selectLocationId);
+    }
   }
 }
 
-function _applyLocationFallback(select, manual) {
-  // If fetch failed but we have a pending location, show it in the manual field
+function _applyLocationFallback(select, manual, locationId) {
+  // If fetch failed but we have a location value, show it in the manual field
   // so the user doesn't lose the value.
-  if (_pendingLocationId) {
+  if (locationId) {
     select.value = '';
-    manual.value = _pendingLocationId;
+    manual.value = locationId;
     manual.classList.remove('hidden');
-    _pendingLocationId = '';
   }
 }
 

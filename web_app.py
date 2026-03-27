@@ -342,10 +342,15 @@ def _normalize_publish_at(value: str) -> str:
         return value  # pass through unparseable values as-is
 
 
+def _network_includes_gbp(network: str) -> bool:
+    """Check whether a network string includes GBP (handles 'ALL' too)."""
+    return network == NETWORK_ALL or NETWORK_GBP in network.split("+")
+
+
 def _validate_gbp_fields(data: dict) -> str | None:
     """Return an error message if GBP fields are invalid, or None if OK."""
     network = data.get(COL_NETWORK, "")
-    if NETWORK_GBP in network.split("+"):
+    if _network_includes_gbp(network):
         location_id = data.get(COL_GOOGLE_LOCATION_ID, "").strip()
         if not location_id:
             return "google_location_id is required when GBP is selected"

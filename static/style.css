@@ -517,6 +517,11 @@ body {
   color: var(--color-success);
 }
 
+.badge-partial {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
 .badge-error {
   background: var(--color-error-soft);
   color: var(--color-error);

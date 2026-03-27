@@ -524,7 +524,10 @@ async function loadGbpLocations(selectLocationId = '') {
   try {
     const resp = await fetch('/api/gbp/locations');
     const data = await resp.json();
-    if (data.error || !data.locations) return;
+    if (data.error || !data.locations) {
+      _applyLocationFallback(select, manual);
+      return;
+    }
 
     // Keep the first "choose" option, add locations
     select.innerHTML = '<option value="">בחר מיקום...</option>';
@@ -551,6 +554,18 @@ async function loadGbpLocations(selectLocationId = '') {
     }
   } catch (e) {
     console.error('Failed to load GBP locations:', e);
+    _applyLocationFallback(select, manual);
+  }
+}
+
+function _applyLocationFallback(select, manual) {
+  // If fetch failed but we have a pending location, show it in the manual field
+  // so the user doesn't lose the value.
+  if (_pendingLocationId) {
+    select.value = '';
+    manual.value = _pendingLocationId;
+    manual.classList.remove('hidden');
+    _pendingLocationId = '';
   }
 }
 
@@ -581,11 +596,17 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
   document.getElementById('form-cta-type').value = ctaType;
   document.getElementById('form-cta-url').value = ctaUrl;
 
-  // Location will be set by loadGbpLocations() after fetch completes.
-  // Reset to empty for now — the async loader applies the pending value.
+  // Location: pre-populate the manual field as a fallback in case the
+  // async loadGbpLocations() fetch fails. The async loader will move
+  // the value to the dropdown if the option exists, or keep it in manual.
   document.getElementById('form-google-location-id').value = '';
-  document.getElementById('form-google-location-id-manual').value = '';
-  document.getElementById('form-google-location-id-manual').classList.add('hidden');
+  if (googleLocationId) {
+    document.getElementById('form-google-location-id-manual').value = googleLocationId;
+    document.getElementById('form-google-location-id-manual').classList.remove('hidden');
+  } else {
+    document.getElementById('form-google-location-id-manual').value = '';
+    document.getElementById('form-google-location-id-manual').classList.add('hidden');
+  }
 
   document.getElementById('form-drive-file-id').value = driveFileId;
   document.getElementById('form-drive-file-id-manual').value = '';

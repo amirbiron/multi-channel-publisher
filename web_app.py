@@ -490,6 +490,87 @@ def api_update_post(row_number):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/posts/<int:row_number>/retry", methods=["POST"])
+def api_retry_post(row_number):
+    """
+    Retry ALL failed channels for a PARTIAL or ERROR post.
+
+    Always retries all channels in failed_channels (per-channel retry not supported
+    as it would require synchronous publishing to avoid data inconsistency).
+
+    Sets the post to PARTIAL so the cron's process_partial_row picks it up.
+    For ERROR posts where all channels failed — if cloudinary_url exists,
+    uses PARTIAL retry; otherwise resets to READY for full re-processing.
+    """
+    if row_number < 2:
+        return jsonify({"error": "Invalid row number"}), 400
+
+    try:
+        header, rows = sheets_read_all_rows()
+        if not header:
+            return jsonify({"error": "Sheet has no header"}), 400
+
+        row_idx = row_number - 2
+        if row_idx < 0 or row_idx >= len(rows):
+            return jsonify({"error": "Row does not exist"}), 404
+
+        row = rows[row_idx]
+
+        def _cell(col):
+            try:
+                idx = header.index(col)
+                return row[idx] if idx < len(row) else ""
+            except ValueError:
+                return ""
+
+        status = _cell(COL_STATUS).strip().upper()
+        if status not in (STATUS_PARTIAL, STATUS_ERROR):
+            return jsonify({"error": f"רק פוסטים עם שגיאה או הצלחה חלקית ניתנים ל-retry (סטטוס נוכחי: {status})"}), 400
+
+        failed_channels = _cell(COL_FAILED_CHANNELS).strip()
+        published_channels = _cell(COL_PUBLISHED_CHANNELS).strip()
+        cloudinary_url = _cell(COL_CLOUDINARY_URL).strip()
+
+        # Note: We always retry ALL failed channels to avoid data inconsistency.
+        # Per-channel retry would require synchronous publishing, which is out of scope.
+        # The UI per-channel buttons are informational only — clicking any triggers full retry.
+        if not failed_channels:
+            return jsonify({"error": "אין ערוצים שנכשלו ל-retry"}), 400
+        retry_channels = [c.strip() for c in failed_channels.split(",") if c.strip()]
+
+        # Determine retry strategy
+        if status == STATUS_ERROR and not cloudinary_url and not published_channels:
+            # All channels failed and no media was uploaded — full re-process
+            updates = {
+                COL_STATUS: STATUS_READY,
+                COL_ERROR: "",
+                COL_FAILED_CHANNELS: "",
+                COL_PUBLISHED_CHANNELS: "",
+                COL_LOCKED_AT: "",
+                COL_PROCESSING_BY: "",
+                COL_RETRY_COUNT: "0",
+            }
+            logger.info(f"Retry row {row_number}: resetting to READY (no cloudinary_url)")
+        else:
+            # Has cloudinary URLs or partial success — set PARTIAL for channel-level retry
+            # Keep failed_channels intact so cron retries all of them
+            updates = {
+                COL_STATUS: STATUS_PARTIAL,
+                COL_ERROR: "",
+                COL_LOCKED_AT: "",
+                COL_PROCESSING_BY: "",
+                COL_RETRY_COUNT: "0",
+            }
+            logger.info(f"Retry row {row_number}: setting PARTIAL for channels {retry_channels}")
+
+        sheets_update_cells(row_number, updates, header)
+        return jsonify({"success": True, "retry_channels": retry_channels})
+
+    except Exception as e:
+        logger.error(f"Error retrying post row {row_number}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/posts/<int:row_number>", methods=["DELETE"])
 def api_delete_post(row_number):
     """מחיקת פוסט (שורה מהטבלה)."""

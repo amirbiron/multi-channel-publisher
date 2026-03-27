@@ -19,7 +19,6 @@ from dateutil import parser as dtparser
 from config import (
     TZ_IL,
     COL_STATUS,
-    COL_NETWORK,
     COL_POST_TYPE,
     COL_PUBLISH_AT,
     COL_CAPTION,
@@ -636,13 +635,18 @@ def process_partial_row(
         row_data = _row_to_dict(row, header)
         row_data[COL_STATUS] = STATUS_PROCESSING
         report = _validator.validate(row_data)
+
+        # If the entire row is blocked, mark as error and bail out
+        if report.row_blocked:
+            error_msg = format_validation_error(report)
+            logger.warning(f"Row {row_id}: Validation blocked on retry — {error_msg}")
+            _mark_error(header, sheet_row_number, f"Partial retry failed: {error_msg}")
+            return True
+
         post_data_norm = report.normalized_post_data
 
-        network = get_cell(row, header, COL_NETWORK).strip().upper()
-        post_type = post_data_norm.get("post_type", POST_TYPE_FEED) if post_data_norm else (
-            get_cell(row, header, COL_POST_TYPE).strip().upper() or POST_TYPE_FEED
-        )
-        caption_generic = post_data_norm.get("caption", "") if post_data_norm else get_cell(row, header, COL_CAPTION)
+        post_type = post_data_norm.get("post_type", POST_TYPE_FEED)
+        caption_generic = post_data_norm.get("caption", "")
         cloud_urls_str = get_cell(row, header, COL_CLOUDINARY_URL).strip()
         cloud_urls = [u.strip() for u in cloud_urls_str.split(",") if u.strip()]
 
@@ -656,13 +660,13 @@ def process_partial_row(
 
         post_data = {
             "caption": caption_generic,
-            COL_CAPTION_IG: post_data_norm.get(COL_CAPTION_IG, "") if post_data_norm else (get_cell(row, header, COL_CAPTION_IG) or caption_generic),
-            COL_CAPTION_FB: post_data_norm.get(COL_CAPTION_FB, "") if post_data_norm else (get_cell(row, header, COL_CAPTION_FB) or caption_generic),
-            COL_CAPTION_GBP: post_data_norm.get(COL_CAPTION_GBP, "") if post_data_norm else get_cell(row, header, COL_CAPTION_GBP),
-            COL_GOOGLE_LOCATION_ID: post_data_norm.get(COL_GOOGLE_LOCATION_ID, "") if post_data_norm else get_cell(row, header, COL_GOOGLE_LOCATION_ID).strip(),
-            COL_GBP_POST_TYPE: post_data_norm.get(COL_GBP_POST_TYPE, "") if post_data_norm else get_cell(row, header, COL_GBP_POST_TYPE).strip(),
-            COL_CTA_TYPE: post_data_norm.get(COL_CTA_TYPE, "") if post_data_norm else get_cell(row, header, COL_CTA_TYPE).strip(),
-            COL_CTA_URL: post_data_norm.get(COL_CTA_URL, "") if post_data_norm else get_cell(row, header, COL_CTA_URL).strip(),
+            COL_CAPTION_IG: post_data_norm.get(COL_CAPTION_IG, ""),
+            COL_CAPTION_FB: post_data_norm.get(COL_CAPTION_FB, ""),
+            COL_CAPTION_GBP: post_data_norm.get(COL_CAPTION_GBP, ""),
+            COL_GOOGLE_LOCATION_ID: post_data_norm.get(COL_GOOGLE_LOCATION_ID, ""),
+            COL_GBP_POST_TYPE: post_data_norm.get(COL_GBP_POST_TYPE, ""),
+            COL_CTA_TYPE: post_data_norm.get(COL_CTA_TYPE, ""),
+            COL_CTA_URL: post_data_norm.get(COL_CTA_URL, ""),
             "cloud_urls": cloud_urls,
             "mime_types": mime_types,
             "post_type": post_type,
@@ -670,16 +674,15 @@ def process_partial_row(
 
         # Filter retry targets: skip channels blocked by validation
         validation_blocked_retry = []
-        if not report.row_blocked:
-            for cid in list(retry_targets):
-                if cid in report.blocked_channels:
-                    validation_blocked_retry.append(cid)
-                    retry_targets.remove(cid)
-                    for issue in report.blocked_channels[cid]:
-                        logger.warning(
-                            f"Row {row_id}: {cid} still blocked on retry — "
-                            f"[{issue.code}] {issue.message}"
-                        )
+        for cid in list(retry_targets):
+            if cid in report.blocked_channels:
+                validation_blocked_retry.append(cid)
+                retry_targets.remove(cid)
+                for issue in report.blocked_channels[cid]:
+                    logger.warning(
+                        f"Row {row_id}: {cid} still blocked on retry — "
+                        f"[{issue.code}] {issue.message}"
+                    )
 
         # Publish only to failed channels
         new_results: dict[str, PublishResult] = {}

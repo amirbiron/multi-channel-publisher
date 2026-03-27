@@ -599,12 +599,14 @@ async function loadGbpLocations(selectLocationId = '', forceRefresh = false) {
     if (requestId !== _locationRequestId) return;
 
     if (data.error || !data.locations) {
+      select.innerHTML = '<option value="">בחר מיקום...</option>';
       _showLocationWarning('לא ניתן לטעון מיקומים מ-Google. ניתן להזין ידנית.');
       _applyLocationFallback(select, manual, selectLocationId);
       return;
     }
 
     if (data.locations.length === 0) {
+      select.innerHTML = '<option value="">בחר מיקום...</option>';
       _showLocationWarning('לא נמצאו מיקומים בחשבון Google Business.');
       _applyLocationFallback(select, manual, selectLocationId);
       return;

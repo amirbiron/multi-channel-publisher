@@ -110,9 +110,19 @@ class TestNormalization:
         row = _make_row(**{COL_CAPTION: "Generic text", COL_CAPTION_IG: "", COL_CAPTION_FB: ""})
         report = validator.validate(row)
         assert not report.row_blocked
-        # Should have warnings about fallback
+        # Should have warnings about fallback only for targeted channels (IG+FB)
         fallback_warnings = [w for w in report.warnings if w.code == ErrorCode.COMMON_CAPTION_FALLBACK]
-        assert len(fallback_warnings) >= 2  # IG and FB at least
+        assert len(fallback_warnings) == 2
+        fallback_channels = {w.channel for w in fallback_warnings}
+        assert fallback_channels == {"IG", "FB"}
+
+    def test_caption_fallback_no_warning_for_non_targeted(self, validator):
+        """No fallback warning for GBP when network is only IG."""
+        row = _make_row(**{COL_NETWORK: "IG", COL_CAPTION: "Text", COL_CAPTION_IG: ""})
+        report = validator.validate(row)
+        fallback_warnings = [w for w in report.warnings if w.code == ErrorCode.COMMON_CAPTION_FALLBACK]
+        assert all(w.channel != "GBP" for w in fallback_warnings)
+        assert all(w.channel != "FB" for w in fallback_warnings)
 
     def test_gbp_post_type_update_mapped_to_standard(self, validator):
         row = _make_gbp_row(**{COL_GBP_POST_TYPE: "UPDATE"})
@@ -327,6 +337,14 @@ class TestAggregation:
         assert report.is_fully_approved
         assert not report.is_partially_approved
         assert set(report.approved_channels) == {"IG", "FB"}
+
+    def test_full_approval_not_when_skipped(self, validator_ig_fb):
+        """Skipped channels mean not fully approved even if all validated pass."""
+        row = _make_row(**{COL_NETWORK: "IG+FB+GBP"})
+        report = validator_ig_fb.validate(row)
+        assert not report.row_blocked
+        assert not report.is_fully_approved  # GBP skipped
+        assert "GBP" in report.skipped_channels
 
     def test_partial_approval_gbp_blocked(self, validator):
         """GBP blocked but IG+FB approved → partial approval."""

@@ -156,7 +156,7 @@ class ValidationReport:
 
     @property
     def is_fully_approved(self) -> bool:
-        return bool(self.approved_channels) and not self.blocked_channels
+        return bool(self.approved_channels) and not self.blocked_channels and not self.skipped_channels
 
     @property
     def blocking_issues(self) -> list[ValidationIssue]:
@@ -329,17 +329,23 @@ class RowValidator:
         status = (out.get(COL_STATUS) or "").upper().strip()
         out[COL_STATUS] = status
 
-        # Caption fallback: channel-specific → generic
+        # Caption fallback: channel-specific → generic (only for targeted channels)
         generic_caption = out.get(COL_CAPTION) or ""
-        for cap_col in (COL_CAPTION_IG, COL_CAPTION_FB, COL_CAPTION_GBP):
+        _caption_to_channel = {
+            COL_CAPTION_IG: "IG",
+            COL_CAPTION_FB: "FB",
+            COL_CAPTION_GBP: "GBP",
+        }
+        for cap_col, ch_id in _caption_to_channel.items():
             if out.get(cap_col) is None:
                 out[cap_col] = generic_caption or None
-                if generic_caption:
+                if generic_caption and ch_id in registered_channels:
                     issues.append(ValidationIssue(
                         code=ErrorCode.COMMON_CAPTION_FALLBACK,
                         message=f"{cap_col} empty — falling back to generic caption",
                         severity="WARNING",
                         field=cap_col,
+                        channel=ch_id,
                     ))
 
         # GBP post type normalization

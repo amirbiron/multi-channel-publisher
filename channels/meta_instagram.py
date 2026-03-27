@@ -51,18 +51,6 @@ class InstagramChannel(BaseChannel):
         except Exception as exc:
             return self._make_result(
                 success=False,
-                error_code=_classify_error(exc),
+                error_code=self.classify_error(exc),
                 error_message=str(exc)[:500],
             )
-
-
-def _classify_error(exc: Exception) -> str:
-    """Best-effort error classification for Meta API errors."""
-    msg = str(exc).lower()
-    if "timeout" in msg:
-        return "timeout"
-    if "rate" in msg or "limit" in msg:
-        return "rate_limit"
-    if hasattr(exc, "response") and exc.response is not None:
-        return f"http_{exc.response.status_code}"
-    return "api_error"

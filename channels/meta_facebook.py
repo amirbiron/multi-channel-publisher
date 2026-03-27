@@ -38,35 +38,16 @@ class FacebookChannel(BaseChannel):
         cloud_urls: list[str] = post_data["cloud_urls"]
         mime_types: list[str] = post_data["mime_types"]
         post_type: str = post_data.get("post_type", "FEED")
-        is_carousel = len(cloud_urls) > 1
 
         try:
-            if is_carousel:
-                # FB carousel not fully supported — publish first item only
-                logger.info("FB carousel not supported — publishing first item only")
-                platform_id = fb_publish_feed(
-                    cloud_urls[0], caption, mime_types[0], post_type,
-                )
-            else:
-                platform_id = fb_publish_feed(
-                    cloud_urls[0], caption, mime_types[0], post_type,
-                )
+            # FB carousel not fully supported — always publish first item
+            platform_id = fb_publish_feed(
+                cloud_urls[0], caption, mime_types[0], post_type,
+            )
             return self._make_result(success=True, platform_post_id=platform_id)
         except Exception as exc:
             return self._make_result(
                 success=False,
-                error_code=_classify_error(exc),
+                error_code=self.classify_error(exc),
                 error_message=str(exc)[:500],
             )
-
-
-def _classify_error(exc: Exception) -> str:
-    """Best-effort error classification for Meta API errors."""
-    msg = str(exc).lower()
-    if "timeout" in msg:
-        return "timeout"
-    if "rate" in msg or "limit" in msg:
-        return "rate_limit"
-    if hasattr(exc, "response") and exc.response is not None:
-        return f"http_{exc.response.status_code}"
-    return "api_error"

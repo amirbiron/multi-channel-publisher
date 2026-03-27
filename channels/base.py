@@ -91,3 +91,15 @@ class BaseChannel:
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} {self.CHANNEL_ID}>"
+
+    @staticmethod
+    def classify_error(exc: Exception) -> str:
+        """Best-effort error classification for API errors."""
+        msg = str(exc).lower()
+        if "timeout" in msg:
+            return "timeout"
+        if "rate" in msg or "limit" in msg:
+            return "rate_limit"
+        if hasattr(exc, "response") and exc.response is not None:
+            return f"http_{exc.response.status_code}"
+        return "api_error"

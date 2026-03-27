@@ -110,40 +110,29 @@ def get_cell(row: list[str], header: list[str], col_name: str, default: str = ""
         return default
 
 
+# Map network value → list of channel IDs it includes
+_NETWORK_TO_CHANNELS = {
+    NETWORK_IG: [NETWORK_IG],
+    NETWORK_FB: [NETWORK_FB],
+    NETWORK_GBP: [NETWORK_GBP],
+    NETWORK_BOTH: [NETWORK_IG, NETWORK_FB],
+    NETWORK_IG_GBP: [NETWORK_IG, NETWORK_GBP],
+    NETWORK_FB_GBP: [NETWORK_FB, NETWORK_GBP],
+    NETWORK_ALL_THREE: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
+    NETWORK_ALL: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
+}
+
+
 def _resolve_targets(network: str) -> list[str]:
-    """
-    Resolve network string to list of publishable channel IDs.
-    Only returns channels that are actually registered in the registry.
-    """
-    # Map network values to the channel IDs they include
-    network_to_channels = {
-        NETWORK_IG: [NETWORK_IG],
-        NETWORK_FB: [NETWORK_FB],
-        NETWORK_GBP: [NETWORK_GBP],
-        NETWORK_BOTH: [NETWORK_IG, NETWORK_FB],
-        NETWORK_IG_GBP: [NETWORK_IG, NETWORK_GBP],
-        NETWORK_FB_GBP: [NETWORK_FB, NETWORK_GBP],
-        NETWORK_ALL_THREE: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
-        NETWORK_ALL: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
-    }
-    requested = network_to_channels.get(network, [])
+    """Resolve network to publishable channel IDs (only registered ones)."""
+    requested = _NETWORK_TO_CHANNELS.get(network, [])
     registered_ids = set(_registry.channel_ids)
     return [cid for cid in requested if cid in registered_ids]
 
 
 def _unregistered_channels(network: str) -> list[str]:
     """Return channel IDs requested by network but not yet registered."""
-    network_to_channels = {
-        NETWORK_IG: [NETWORK_IG],
-        NETWORK_FB: [NETWORK_FB],
-        NETWORK_GBP: [NETWORK_GBP],
-        NETWORK_BOTH: [NETWORK_IG, NETWORK_FB],
-        NETWORK_IG_GBP: [NETWORK_IG, NETWORK_GBP],
-        NETWORK_FB_GBP: [NETWORK_FB, NETWORK_GBP],
-        NETWORK_ALL_THREE: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
-        NETWORK_ALL: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
-    }
-    requested = network_to_channels.get(network, [])
+    requested = _NETWORK_TO_CHANNELS.get(network, [])
     registered_ids = set(_registry.channel_ids)
     return [cid for cid in requested if cid not in registered_ids]
 

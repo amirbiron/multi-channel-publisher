@@ -287,9 +287,19 @@ def process_row(
         for cid in targets:
             channel = _registry.get(cid)
             logger.info(f"Row {row_id}: Publishing to {cid} ({channel.CHANNEL_NAME})...")
-            publish_results[cid] = _publish_channel_with_retry(
-                channel, post_data, row_id=row_id,
-            )
+            try:
+                publish_results[cid] = _publish_channel_with_retry(
+                    channel, post_data, row_id=row_id,
+                )
+            except Exception as exc:
+                logger.exception(f"Row {row_id}: Unexpected error publishing to {cid}")
+                publish_results[cid] = PublishResult(
+                    channel=cid,
+                    success=False,
+                    status="ERROR",
+                    error_code="unexpected_error",
+                    error_message=str(exc)[:500],
+                )
 
         # ── שלב 5: סימון תוצאה ──
         succeeded = {cid: r for cid, r in publish_results.items() if r.success}

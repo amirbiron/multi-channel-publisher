@@ -10,7 +10,13 @@ from unittest.mock import patch, MagicMock, call
 
 import pytest
 
-from config import TZ_IL, STATUS_READY, STATUS_POSTED, STATUS_ERROR, STATUS_IN_PROGRESS
+from config import (
+    TZ_IL,
+    STATUS_READY, STATUS_POSTED, STATUS_ERROR, STATUS_IN_PROGRESS,
+    STATUS_DRAFT, STATUS_PARTIAL,
+    NETWORK_GBP, VALID_NETWORKS,
+    COL_CAPTION,
+)
 from main import (
     is_due,
     get_cell,
@@ -22,10 +28,16 @@ from main import (
 )
 
 # ─── Header fixture ──────────────────────────────────────────
+# Mirrors SHEET_COLUMNS from config_constants.py.
+# Old IG/FB-only rows still work — new columns default to "".
 HEADER = [
     "id", "status", "network", "post_type", "publish_at",
-    "caption_ig", "caption_fb", "drive_file_id",
-    "cloudinary_url", "result", "error",
+    "caption", "caption_ig", "caption_fb", "caption_gbp",
+    "gbp_post_type", "cta_type", "cta_url", "google_location_id",
+    "drive_file_id", "cloudinary_url", "source",
+    "result", "error",
+    "retry_count", "locked_at", "processing_by",
+    "published_channels", "failed_channels",
 ]
 
 NOW_UTC = datetime(2026, 3, 22, 12, 0, 0, tzinfo=timezone.utc)
@@ -35,14 +47,23 @@ def _make_row(
     network="IG",
     post_type="FEED",
     drive_id="abc123",
+    caption="",
     caption_ig="hello",
     caption_fb="",
+    caption_gbp="",
     status=STATUS_READY,
+    google_location_id="",
+    source="",
 ):
     """Build a row matching HEADER order."""
     return [
         "1", status, network, post_type, "2026-03-22 10:00",
-        caption_ig, caption_fb, drive_id, "", "", "",
+        caption, caption_ig, caption_fb, caption_gbp,
+        "", "", "", google_location_id,
+        drive_id, "", source,
+        "", "",
+        "", "", "",
+        "", "",
     ]
 
 
@@ -93,9 +114,18 @@ class TestGetCell:
 #  process_row — success paths
 # ═══════════════════════════════════════════════════════════════
 
+def _make_row_with_publish_at(publish_at, **kwargs):
+    """Build a row with a custom publish_at timestamp."""
+    row = _make_row(**kwargs)
+    idx = HEADER.index("publish_at")
+    row[idx] = publish_at
+    return row
+
+
 def _in_progress_row(**kwargs):
     """Build a row with IN_PROGRESS status for lock verification tests."""
-    return _make_row(status=STATUS_IN_PROGRESS, **kwargs)
+    kwargs.setdefault("status", STATUS_IN_PROGRESS)
+    return _make_row(**kwargs)
 
 
 class TestProcessRowSuccess:
@@ -287,8 +317,8 @@ class TestMainLoop:
                 _make_row(),
                 # row 3: POSTED → skip
                 _make_row(status="POSTED"),
-                # row 4: READY + future → skip (we override publish_at below)
-                ["3", "READY", "IG", "FEED", "2099-01-01 10:00", "cap", "", "abc", "", "", ""],
+                # row 4: READY + future → skip
+                _make_row_with_publish_at("2099-01-01 10:00"),
                 # row 5: READY + due → should process
                 _make_row(network="FB", caption_ig="", caption_fb="cap"),
             ],
@@ -352,13 +382,22 @@ class TestCloudinaryUrlRegex:
 #  cleanup_old_cloudinary_assets
 # ═══════════════════════════════════════════════════════════════
 
+def _make_cleanup_row(status, publish_at, cloud_url, drive_id="abc", result="r1"):
+    """Build a row for cleanup tests with the correct HEADER layout."""
+    row = _make_row(status=status, drive_id=drive_id)
+    row[HEADER.index("publish_at")] = publish_at
+    row[HEADER.index("cloudinary_url")] = cloud_url
+    row[HEADER.index("result")] = result
+    return row
+
+
 class TestCleanup:
     @patch("main.sheets_update_cells")
     @patch("main.delete_from_cloudinary", return_value=True)
     def test_deletes_old_posted_assets(self, mock_delete, mock_sheets):
         rows = [
-            ["1", "POSTED", "IG", "FEED", "2026-01-01 10:00", "", "",
-             "abc", "https://res.cloudinary.com/x/image/upload/v1/social-publisher/old.jpg", "r1", ""],
+            _make_cleanup_row("POSTED", "2026-01-01 10:00",
+                              "https://res.cloudinary.com/x/image/upload/v1/social-publisher/old.jpg"),
         ]
         deleted = cleanup_old_cloudinary_assets(HEADER, rows, NOW_UTC)
         assert deleted == 1
@@ -367,8 +406,8 @@ class TestCleanup:
     @patch("main.delete_from_cloudinary")
     def test_skips_recent_posts(self, mock_delete):
         rows = [
-            ["1", "POSTED", "IG", "FEED", "2026-03-22 10:00", "", "",
-             "abc", "https://res.cloudinary.com/x/image/upload/v1/social-publisher/new.jpg", "r1", ""],
+            _make_cleanup_row("POSTED", "2026-03-22 10:00",
+                              "https://res.cloudinary.com/x/image/upload/v1/social-publisher/new.jpg"),
         ]
         deleted = cleanup_old_cloudinary_assets(HEADER, rows, NOW_UTC)
         assert deleted == 0
@@ -377,8 +416,8 @@ class TestCleanup:
     @patch("main.delete_from_cloudinary")
     def test_skips_non_posted_rows(self, mock_delete):
         rows = [
-            ["1", "READY", "IG", "FEED", "2026-01-01 10:00", "", "",
-             "abc", "https://res.cloudinary.com/x/image/upload/v1/social-publisher/x.jpg", "", ""],
+            _make_cleanup_row("READY", "2026-01-01 10:00",
+                              "https://res.cloudinary.com/x/image/upload/v1/social-publisher/x.jpg"),
         ]
         deleted = cleanup_old_cloudinary_assets(HEADER, rows, NOW_UTC)
         assert deleted == 0
@@ -393,13 +432,24 @@ class TestCleanup:
             "https://res.cloudinary.com/x/video/upload/v1/social-publisher/c.mp4"
         )
         rows = [
-            ["1", "POSTED", "IG", "FEED", "2026-01-01 10:00", "", "",
-             "f1,f2,f3", urls, "r1", ""],
+            _make_cleanup_row("POSTED", "2026-01-01 10:00", urls, drive_id="f1,f2,f3"),
         ]
         deleted = cleanup_old_cloudinary_assets(HEADER, rows, NOW_UTC)
         assert deleted == 3
         assert mock_delete.call_count == 3
         mock_sheets.assert_called_once()  # cleared URL field once
+
+    @patch("main.sheets_update_cells")
+    @patch("main.delete_from_cloudinary", return_value=True)
+    def test_deletes_partial_row_assets(self, mock_delete, mock_sheets):
+        """PARTIAL rows should also have their Cloudinary assets cleaned up."""
+        rows = [
+            _make_cleanup_row("PARTIAL", "2026-01-01 10:00",
+                              "https://res.cloudinary.com/x/image/upload/v1/social-publisher/partial.jpg"),
+        ]
+        deleted = cleanup_old_cloudinary_assets(HEADER, rows, NOW_UTC)
+        assert deleted == 1
+        mock_delete.assert_called_once_with("social-publisher/partial", resource_type="image")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -576,3 +626,156 @@ class TestPublishWithRetry:
         with pytest.raises(Exception, match="persistent error"):
             _publish_with_retry(fn, "url", "cap", row_id="1", network_name="IG")
         assert fn.call_count == 2
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Multi-Channel Schema — new column / value tests
+# ═══════════════════════════════════════════════════════════════
+
+class TestNewSchemaConstants:
+    """Verify the new constants from Task 1 exist and are correct."""
+
+    def test_new_status_values(self):
+        assert STATUS_DRAFT == "DRAFT"
+        assert STATUS_PARTIAL == "PARTIAL"
+
+    def test_new_network_values(self):
+        assert NETWORK_GBP == "GBP"
+        assert "IG+GBP" in VALID_NETWORKS
+        assert "FB+GBP" in VALID_NETWORKS
+        assert "IG+FB+GBP" in VALID_NETWORKS
+        assert "ALL" in VALID_NETWORKS
+
+    def test_valid_networks_includes_legacy(self):
+        assert "IG" in VALID_NETWORKS
+        assert "FB" in VALID_NETWORKS
+        assert "IG+FB" in VALID_NETWORKS
+
+    def test_header_contains_new_columns(self):
+        from config_constants import SHEET_COLUMNS
+        assert "caption" in SHEET_COLUMNS
+        assert "caption_gbp" in SHEET_COLUMNS
+        assert "gbp_post_type" in SHEET_COLUMNS
+        assert "cta_type" in SHEET_COLUMNS
+        assert "cta_url" in SHEET_COLUMNS
+        assert "google_location_id" in SHEET_COLUMNS
+        assert "source" in SHEET_COLUMNS
+        assert "retry_count" in SHEET_COLUMNS
+        assert "locked_at" in SHEET_COLUMNS
+        assert "processing_by" in SHEET_COLUMNS
+        assert "published_channels" in SHEET_COLUMNS
+        assert "failed_channels" in SHEET_COLUMNS
+
+
+class TestCaptionFallbackToGeneric:
+    """caption_{channel} → caption (generic) fallback."""
+
+    @patch("main.sheets_read_row", return_value=_make_row(
+        status=STATUS_IN_PROGRESS, caption="generic text", caption_ig="", caption_fb="",
+    ))
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
+    @patch("main.ig_publish_feed", return_value="media_999")
+    def test_ig_falls_back_to_generic_caption(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+        row = _make_row(caption="generic text", caption_ig="", caption_fb="")
+        process_row(row, HEADER, 2)
+
+        mock_ig.assert_called_once()
+        assert mock_ig.call_args[0][1] == "generic text"
+
+    @patch("main.sheets_read_row", return_value=_make_row(
+        status=STATUS_IN_PROGRESS, network="FB",
+        caption="generic fb", caption_ig="", caption_fb="",
+    ))
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
+    @patch("main.fb_publish_feed", return_value="fb_999")
+    def test_fb_falls_back_to_generic_caption(self, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+        row = _make_row(network="FB", caption="generic fb", caption_ig="", caption_fb="")
+        process_row(row, HEADER, 2)
+
+        mock_fb.assert_called_once()
+        assert mock_fb.call_args[0][1] == "generic fb"
+
+    @patch("main.sheets_read_row", return_value=_make_row(
+        status=STATUS_IN_PROGRESS, caption="generic", caption_ig="specific",
+    ))
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
+    @patch("main.ig_publish_feed", return_value="media_777")
+    def test_channel_caption_takes_precedence(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+        """caption_ig should take precedence over generic caption."""
+        row = _make_row(caption="generic", caption_ig="specific")
+        process_row(row, HEADER, 2)
+
+        mock_ig.assert_called_once()
+        assert mock_ig.call_args[0][1] == "specific"
+
+
+class TestGBPOnlyNetwork:
+    """GBP-only rows should be handled gracefully until GBP channel is implemented."""
+
+    @patch("main.sheets_read_row", return_value=_make_row(
+        status=STATUS_IN_PROGRESS, network="GBP",
+    ))
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary")
+    @patch("main.drive_download_with_metadata")
+    def test_gbp_only_marks_error_without_io(self, mock_drive, mock_cloud, mock_sheets, mock_reread):
+        """GBP-only row should exit before any Drive/Cloudinary I/O."""
+        row = _make_row(network="GBP")
+        result = process_row(row, HEADER, 2)
+
+        assert result is True
+        last_call = mock_sheets.call_args_list[-1]
+        assert last_call[0][1]["status"] == STATUS_ERROR
+        assert "not yet implemented" in last_call[0][1]["error"]
+        # No expensive I/O should have happened
+        mock_drive.assert_not_called()
+        mock_cloud.assert_not_called()
+
+    @patch("main.sheets_read_row", return_value=_make_row(
+        status=STATUS_IN_PROGRESS, network="IG+GBP",
+    ))
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
+    @patch("main.ig_publish_feed", return_value="ig_media_777")
+    def test_mixed_gbp_marks_partial(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+        """IG+GBP should publish IG and mark PARTIAL with GBP as failed_channels."""
+        row = _make_row(network="IG+GBP")
+        result = process_row(row, HEADER, 2)
+
+        assert result is True
+        mock_ig.assert_called_once()
+        last_call = mock_sheets.call_args_list[-1]
+        assert last_call[0][1]["status"] == STATUS_PARTIAL
+        assert "GBP" in last_call[0][1]["error"]
+        assert last_call[0][1]["failed_channels"] == "GBP"
+        assert "IG" in last_call[0][1]["published_channels"]
+
+
+class TestBackwardCompatibility:
+    """Existing IG/FB rows with old data continue to work with the new schema."""
+
+    @patch("main.sheets_read_row", return_value=_make_row(status=STATUS_IN_PROGRESS))
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
+    @patch("main.ig_publish_feed", return_value="media_100")
+    def test_legacy_ig_row_still_works(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+        """A simple IG row with no new columns should still publish."""
+        row = _make_row()
+        process_row(row, HEADER, 2)
+
+        mock_ig.assert_called_once()
+        posted_call = mock_sheets.call_args_list[-1]
+        assert posted_call[0][1]["status"] == STATUS_POSTED

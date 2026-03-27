@@ -21,22 +21,31 @@ from config import (
     COL_NETWORK,
     COL_POST_TYPE,
     COL_PUBLISH_AT,
+    COL_CAPTION,
     COL_CAPTION_IG,
     COL_CAPTION_FB,
     COL_DRIVE_FILE_ID,
     COL_CLOUDINARY_URL,
     COL_RESULT,
     COL_ERROR,
+    COL_PUBLISHED_CHANNELS,
+    COL_FAILED_CHANNELS,
     STATUS_READY,
     STATUS_IN_PROGRESS,
     STATUS_POSTED,
+    STATUS_PARTIAL,
     STATUS_ERROR,
     NETWORK_IG,
     NETWORK_FB,
+    NETWORK_GBP,
     NETWORK_BOTH,
+    NETWORK_IG_GBP,
+    NETWORK_FB_GBP,
+    NETWORK_ALL_THREE,
+    NETWORK_ALL,
+    VALID_NETWORKS,
     POST_TYPE_FEED,
     POST_TYPE_REELS,
-    VIDEO_MIMES,
     PUBLISH_MAX_RETRIES,
     PUBLISH_RETRY_DELAY,
 )
@@ -157,16 +166,32 @@ def process_row(
         network = get_cell(row, header, COL_NETWORK).strip().upper()
         post_type = get_cell(row, header, COL_POST_TYPE).strip().upper() or POST_TYPE_FEED
         drive_file_id = get_cell(row, header, COL_DRIVE_FILE_ID).strip()
-        caption_ig = get_cell(row, header, COL_CAPTION_IG)
-        caption_fb = get_cell(row, header, COL_CAPTION_FB)
+        caption_generic = get_cell(row, header, COL_CAPTION)
+        caption_ig = get_cell(row, header, COL_CAPTION_IG) or caption_generic
+        caption_fb = get_cell(row, header, COL_CAPTION_FB) or caption_generic
 
         if not drive_file_id:
             _mark_error(header, sheet_row_number, "Missing drive_file_id")
             return True
 
-        valid_networks = (NETWORK_IG, NETWORK_FB, NETWORK_BOTH)
-        if network not in valid_networks:
+        if network not in VALID_NETWORKS:
             _mark_error(header, sheet_row_number, f"Unknown network: {network}")
+            return True
+
+        # ── בדיקת ערוצי יעד לפני I/O — מונע העלאות מיותרות ──
+        targets = []
+        if network in (NETWORK_IG, NETWORK_BOTH, NETWORK_IG_GBP, NETWORK_ALL_THREE, NETWORK_ALL):
+            targets.append(NETWORK_IG)
+        if network in (NETWORK_FB, NETWORK_BOTH, NETWORK_FB_GBP, NETWORK_ALL_THREE, NETWORK_ALL):
+            targets.append(NETWORK_FB)
+        # GBP publishing will be handled by the channel layer (Task 5+).
+        has_gbp = network in (NETWORK_GBP, NETWORK_IG_GBP, NETWORK_FB_GBP, NETWORK_ALL_THREE, NETWORK_ALL)
+        if has_gbp:
+            logger.info(f"Row {row_id}: GBP channel not yet implemented — skipping GBP target")
+
+        if not targets:
+            # GBP-only row — nothing to publish yet; exit before expensive I/O
+            _mark_error(header, sheet_row_number, "GBP channel not yet implemented")
             return True
 
         # ── פירוק drive_file_id — תמיכה בקבצים מרובים (קרוסלה) ──
@@ -216,12 +241,6 @@ def process_row(
         cloud_urls_str = ",".join(cloud_urls)
 
         # ── שלב 4: פרסום ──
-        targets = []
-        if network in (NETWORK_IG, NETWORK_BOTH):
-            targets.append(NETWORK_IG)
-        if network in (NETWORK_FB, NETWORK_BOTH):
-            targets.append(NETWORK_FB)
-
         results = {}
         errors = {}
 
@@ -274,8 +293,9 @@ def process_row(
             raise list(errors.values())[0]
 
         # בניית מחרוזת תוצאה
+        is_multi = len(targets) > 1
         result_parts = [f"{net}:{rid}" for net, rid in results.items()]
-        result_str = " | ".join(result_parts) if network == NETWORK_BOTH else str(list(results.values())[0])
+        result_str = " | ".join(result_parts) if is_multi else str(list(results.values())[0])
 
         if errors:
             # הצלחה חלקית — מסמנים ERROR עם פירוט מה הצליח ומה נכשל
@@ -292,6 +312,23 @@ def process_row(
                     COL_CLOUDINARY_URL: cloud_urls_str,
                     COL_RESULT: result_str,
                     COL_ERROR: error_detail[:500],
+                },
+                header,
+            )
+        elif has_gbp:
+            # IG/FB succeeded but GBP was skipped — mark PARTIAL so these
+            # rows can be retried once GBP is implemented
+            gbp_note = "GBP: skipped (not yet implemented)"
+            logger.warning(f"Row {row_id}: PARTIAL — {result_str} | {gbp_note}")
+            sheets_update_cells(
+                sheet_row_number,
+                {
+                    COL_STATUS: STATUS_PARTIAL,
+                    COL_CLOUDINARY_URL: cloud_urls_str,
+                    COL_RESULT: result_str,
+                    COL_ERROR: gbp_note,
+                    COL_PUBLISHED_CHANNELS: ",".join(results.keys()),
+                    COL_FAILED_CHANNELS: "GBP",
                 },
                 header,
             )
@@ -362,7 +399,7 @@ def cleanup_old_cloudinary_assets(
     now_utc: datetime,
 ) -> int:
     """
-    מוחק נכסים מ-Cloudinary עבור שורות POSTED
+    מוחק נכסים מ-Cloudinary עבור שורות POSTED או PARTIAL
     שפורסמו לפני יותר מ-CLOUDINARY_RETENTION_DAYS ימים.
     מחזיר מספר הנכסים שנמחקו.
     """
@@ -371,7 +408,7 @@ def cleanup_old_cloudinary_assets(
 
     for i, row in enumerate(rows, start=2):
         status = get_cell(row, header, COL_STATUS).strip().upper()
-        if status != STATUS_POSTED:
+        if status not in (STATUS_POSTED, STATUS_PARTIAL):
             continue
 
         cloud_url = get_cell(row, header, COL_CLOUDINARY_URL).strip()

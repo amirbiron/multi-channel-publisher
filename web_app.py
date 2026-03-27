@@ -493,11 +493,10 @@ def api_update_post(row_number):
 @app.route("/api/posts/<int:row_number>/retry", methods=["POST"])
 def api_retry_post(row_number):
     """
-    Retry failed channels for a PARTIAL or ERROR post.
+    Retry ALL failed channels for a PARTIAL or ERROR post.
 
-    Accepts optional JSON body:
-        {"channels": ["GBP"]}  — retry only specific channels
-    If omitted, retries all channels listed in failed_channels.
+    Always retries all channels in failed_channels (per-channel retry not supported
+    as it would require synchronous publishing to avoid data inconsistency).
 
     Sets the post to PARTIAL so the cron's process_partial_row picks it up.
     For ERROR posts where all channels failed — if cloudinary_url exists,
@@ -507,9 +506,6 @@ def api_retry_post(row_number):
         return jsonify({"error": "Invalid row number"}), 400
 
     try:
-        data = request.json or {}
-        requested_channels = data.get("channels")  # optional list
-
         header, rows = sheets_read_all_rows()
         if not header:
             return jsonify({"error": "Sheet has no header"}), 400

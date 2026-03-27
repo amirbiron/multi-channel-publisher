@@ -725,10 +725,10 @@ def process_partial_row(
         still_failed = {cid for cid, r in new_results.items() if not r.success}
         all_published = already_published | newly_succeeded
 
-        # Build updated result string
+        # Build updated result string — same CHANNEL:STATUS:detail format as process_row
         existing_result = get_cell(row, header, COL_RESULT).strip()
         new_result_parts = [
-            f"{cid}:{r.platform_post_id}" for cid, r in new_results.items() if r.success
+            f"{cid}:POSTED:{r.platform_post_id}" for cid, r in new_results.items() if r.success
         ]
         if new_result_parts:
             result_str = f"{existing_result} | {' | '.join(new_result_parts)}" if existing_result else " | ".join(new_result_parts)
@@ -737,7 +737,7 @@ def process_partial_row(
 
         if still_failed:
             error_parts = [
-                f"{cid}: {new_results[cid].error_message}" for cid in still_failed
+                f"{cid}: [{new_results[cid].error_code}] {new_results[cid].error_message}" for cid in still_failed
             ]
             sheets_update_cells(
                 sheet_row_number,

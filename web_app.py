@@ -535,17 +535,12 @@ def api_retry_post(row_number):
         published_channels = _cell(COL_PUBLISHED_CHANNELS).strip()
         cloudinary_url = _cell(COL_CLOUDINARY_URL).strip()
 
-        if requested_channels:
-            # Validate requested channels are actually failed
-            failed_set = {c.strip() for c in failed_channels.split(",") if c.strip()}
-            invalid = [c for c in requested_channels if c not in failed_set]
-            if invalid:
-                return jsonify({"error": f"הערוצים {', '.join(invalid)} לא נמצאים ברשימת הכשלונות"}), 400
-            retry_channels = requested_channels
-        else:
-            if not failed_channels:
-                return jsonify({"error": "אין ערוצים שנכשלו ל-retry"}), 400
-            retry_channels = [c.strip() for c in failed_channels.split(",") if c.strip()]
+        # Note: We always retry ALL failed channels to avoid data inconsistency.
+        # Per-channel retry would require synchronous publishing, which is out of scope.
+        # The UI per-channel buttons are informational only — clicking any triggers full retry.
+        if not failed_channels:
+            return jsonify({"error": "אין ערוצים שנכשלו ל-retry"}), 400
+        retry_channels = [c.strip() for c in failed_channels.split(",") if c.strip()]
 
         # Determine retry strategy
         if status == STATUS_ERROR and not cloudinary_url and not published_channels:
@@ -562,9 +557,9 @@ def api_retry_post(row_number):
             logger.info(f"Retry row {row_number}: resetting to READY (no cloudinary_url)")
         else:
             # Has cloudinary URLs or partial success — set PARTIAL for channel-level retry
+            # Keep failed_channels intact so cron retries all of them
             updates = {
                 COL_STATUS: STATUS_PARTIAL,
-                COL_FAILED_CHANNELS: ",".join(retry_channels),
                 COL_ERROR: "",
                 COL_LOCKED_AT: "",
                 COL_PROCESSING_BY: "",

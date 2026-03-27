@@ -318,16 +318,10 @@ function renderPosts() {
          </div>`
       : '<span style="color:var(--color-text-muted)">-</span>';
 
-    // Retry buttons for failed channels
+    // Single retry button for all failed channels
     let retryHtml = '';
     if (hasFailures && failedChannels.length > 0) {
-      const retryBtns = failedChannels.map(ch =>
-        `<button class="btn btn-retry btn-sm" onclick="retryChannel(${post._row}, '${escapeHtml(ch)}')" title="נסה שוב ${escapeHtml(ch)}">&#8635; ${escapeHtml(ch)}</button>`
-      ).join('');
-      const retryAllBtn = failedChannels.length > 1
-        ? `<button class="btn btn-retry-all btn-sm" onclick="retryAllFailed(${post._row})" title="נסה שוב הכל">&#8635; הכל</button>`
-        : '';
-      retryHtml = `<div class="retry-actions">${retryBtns}${retryAllBtn}</div>`;
+      retryHtml = `<div class="retry-actions"><button class="btn btn-retry-all btn-sm" onclick="retryAllFailed(${post._row})" title="נסה שוב את כל הערוצים שנכשלו">&#8635; נסה שוב</button></div>`;
     }
 
     // Results cell: channel statuses + retry
@@ -398,16 +392,11 @@ function renderPosts() {
 
       // Channel results + retry for mobile
       let resultsPart = '';
-      if (channelResults || hasFailures) {
+      const hasRetryButtons = hasFailures && failedChannels.length > 0;
+      if (channelResults || hasRetryButtons) {
         let retryMobileHtml = '';
-        if (hasFailures && failedChannels.length > 0) {
-          const retryBtns = failedChannels.map(ch =>
-            `<button class="btn btn-retry btn-sm" onclick="retryChannel(${post._row}, '${escapeHtml(ch)}')">&#8635; ${escapeHtml(ch)}</button>`
-          ).join('');
-          const retryAllBtn = failedChannels.length > 1
-            ? `<button class="btn btn-retry-all btn-sm" onclick="retryAllFailed(${post._row})">&#8635; הכל</button>`
-            : '';
-          retryMobileHtml = `<div class="retry-actions">${retryBtns}${retryAllBtn}</div>`;
+        if (hasRetryButtons) {
+          retryMobileHtml = `<div class="retry-actions"><button class="btn btn-retry-all btn-sm" onclick="retryAllFailed(${post._row})">&#8635; נסה שוב</button></div>`;
         }
         resultsPart = `<div class="post-card-divider"></div>
           <div>
@@ -911,7 +900,8 @@ function showError(rowNumber) {
 
   const friendly = friendlyError(post.error);
   const detail = post.error || 'אין פרטי שגיאה';
-  const text = friendly !== detail
+  // Only show friendly + technical split if we found a known error code
+  const text = friendly
     ? `${friendly}\n\n── פרטים טכניים ──\n${detail}`
     : detail;
 
@@ -1480,21 +1470,16 @@ const ERROR_CODE_LABELS = {
 };
 
 function friendlyError(errorStr) {
-  if (!errorStr) return 'שגיאה לא ידועה';
+  if (!errorStr) return null;
   // Try to match known error codes from the result string
   for (const [code, label] of Object.entries(ERROR_CODE_LABELS)) {
     if (errorStr.includes(code)) return label;
   }
-  // Truncate long errors for display
-  return errorStr.length > 120 ? errorStr.substring(0, 117) + '...' : errorStr;
+  // No known code found — return null (caller handles display)
+  return null;
 }
 
 // ─── Retry Functions ─────────────────────────────────────────
-async function retryChannel(rowNumber, channel) {
-  if (!confirm(`לנסות שוב את ${channel}?`)) return;
-  await _doRetry(rowNumber, [channel]);
-}
-
 async function retryAllFailed(rowNumber) {
   if (!confirm('לנסות שוב את כל הערוצים שנכשלו?')) return;
   await _doRetry(rowNumber, null);

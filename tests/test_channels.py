@@ -21,8 +21,8 @@ from channels.registry import ChannelRegistry
 class DummyChannelOK(BaseChannel):
     CHANNEL_ID = "TEST_OK"
     CHANNEL_NAME = "Test OK Channel"
-    SUPPORTED_POST_TYPES = ["FEED"]
-    SUPPORTED_MEDIA_TYPES = ["image"]
+    SUPPORTED_POST_TYPES = ("FEED",)
+    SUPPORTED_MEDIA_TYPES = ("image",)
     CAPTION_COLUMN = "caption_test"
 
     def validate(self, post_data: dict) -> list[str]:
@@ -42,8 +42,8 @@ class DummyChannelOK(BaseChannel):
 class DummyChannelFail(BaseChannel):
     CHANNEL_ID = "TEST_FAIL"
     CHANNEL_NAME = "Test Fail Channel"
-    SUPPORTED_POST_TYPES = ["FEED"]
-    SUPPORTED_MEDIA_TYPES = ["image"]
+    SUPPORTED_POST_TYPES = ("FEED",)
+    SUPPORTED_MEDIA_TYPES = ("image",)
     CAPTION_COLUMN = "caption_fail"
 
     def validate(self, post_data: dict) -> list[str]:
@@ -61,8 +61,8 @@ class DummyChannelExplode(BaseChannel):
     """Raises an unhandled exception in publish()."""
     CHANNEL_ID = "TEST_EXPLODE"
     CHANNEL_NAME = "Test Explode Channel"
-    SUPPORTED_POST_TYPES = ["FEED"]
-    SUPPORTED_MEDIA_TYPES = ["image"]
+    SUPPORTED_POST_TYPES = ("FEED",)
+    SUPPORTED_MEDIA_TYPES = ("image",)
     CAPTION_COLUMN = "caption_explode"
 
     def validate(self, post_data: dict) -> list[str]:

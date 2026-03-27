@@ -38,8 +38,8 @@ class BaseChannel:
 
     CHANNEL_ID: str = ""                    # "IG", "FB", "GBP"
     CHANNEL_NAME: str = ""                  # "Instagram", "Facebook", …
-    SUPPORTED_POST_TYPES: list[str] = []    # ["FEED", "REELS"] / ["STANDARD"]
-    SUPPORTED_MEDIA_TYPES: list[str] = []   # ["image", "video"] / ["image", "none"]
+    SUPPORTED_POST_TYPES: tuple[str, ...] = ()   # ("FEED", "REELS") / ("STANDARD",)
+    SUPPORTED_MEDIA_TYPES: tuple[str, ...] = ()  # ("image", "video") / ("image", "none")
     CAPTION_COLUMN: str = ""                # "caption_ig", "caption_fb", …
 
     # ── interface ──────────────────────────────────────────────

@@ -633,21 +633,6 @@ body {
   margin-top: 4px;
 }
 
-.btn-retry {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-  border: 1px solid oklch(0.75 0.15 85 / 0.3);
-  border-radius: 6px;
-  font-size: var(--font-size-xs);
-  padding: 2px 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.btn-retry:hover {
-  background: oklch(0.75 0.15 85 / 0.25);
-}
-
 .btn-retry-all {
   background: var(--color-accent-soft);
   color: var(--color-accent);

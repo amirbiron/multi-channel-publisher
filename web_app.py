@@ -559,6 +559,7 @@ def api_retry_post(row_number):
                 COL_ERROR: "",
                 COL_LOCKED_AT: "",
                 COL_PROCESSING_BY: "",
+                COL_RETRY_COUNT: "0",
             }
             logger.info(f"Retry row {row_number}: setting PARTIAL for channels {retry_channels}")
 

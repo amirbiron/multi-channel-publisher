@@ -198,6 +198,7 @@ def process_row(
 
     correlation_id = generate_correlation_id()
     event_logger = PublishEventLogger(correlation_id=correlation_id, post_row_id=row_id)
+    _job_ended = False
 
     try:
         # ── שלב 0: אימות נעילה (re-read מהטבלה) ──
@@ -375,7 +376,6 @@ def process_row(
                         error_parts.append(f"{cid}: [{issue.code}] {issue.message}")
             error_detail = f"Partial success. Failures: {'; '.join(error_parts)}"
             logger.warning(f"Row {row_id}: PARTIAL — {error_detail}")
-            event_logger.log_job_end(success=False, summary=error_detail[:200])
             notify_partial_success(row_id, result_str, "; ".join(error_parts), correlation_id=correlation_id)
             # GBP-specific alert
             for cid, r in failed.items():
@@ -395,10 +395,11 @@ def process_row(
                 },
                 header,
             )
+            event_logger.log_job_end(success=False, summary=error_detail[:200])
+            _job_ended = True
         elif skipped_channels:
             # All registered channels succeeded, but some were skipped
             skipped_note = f"{','.join(skipped_channels)}: skipped (not yet implemented)"
-            event_logger.log_job_end(success=False, summary=skipped_note)
             logger.warning(f"Row {row_id}: PARTIAL — {result_str} | {skipped_note}")
             sheets_update_cells(
                 sheet_row_number,
@@ -414,6 +415,8 @@ def process_row(
                 },
                 header,
             )
+            event_logger.log_job_end(success=False, summary=skipped_note)
+            _job_ended = True
         else:
             sheets_update_cells(
                 sheet_row_number,
@@ -430,6 +433,7 @@ def process_row(
                 header,
             )
             event_logger.log_job_end(success=True, summary=result_str)
+            _job_ended = True
             logger.info(f"Row {row_id}: POSTED successfully ({result_str})")
 
     except Exception as e:
@@ -444,7 +448,8 @@ def process_row(
             except Exception:
                 pass
         logger.error(f"Row {row_id}: ERROR — {error_detail}", exc_info=True)
-        event_logger.log_job_end(success=False, summary=error_detail[:200])
+        if not _job_ended:
+            event_logger.log_job_end(success=False, summary=error_detail[:200])
         notify_publish_error(row_id, error_detail, correlation_id=correlation_id)
         try:
             _mark_error(header, sheet_row_number, error_detail)

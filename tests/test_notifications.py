@@ -9,6 +9,8 @@ from notifications import (
     notify_publish_error,
     notify_partial_success,
     notify_health_issue,
+    notify_gbp_error,
+    notify_processing_timeout,
     is_telegram_configured,
     _truncate,
 )
@@ -133,6 +135,54 @@ class TestNotifyFunctions:
         msg = mock_send.call_args[0][0]
         assert "&lt;expired&gt;" in msg
         assert "&amp; invalid" in msg
+
+
+class TestNotifyWithCorrelationId:
+    @patch("notifications.send_telegram")
+    def test_notify_publish_error_with_correlation_id(self, mock_send):
+        notify_publish_error("42", "Something broke", correlation_id="job_20260327_180005_abc")
+        msg = mock_send.call_args[0][0]
+        assert "job_20260327_180005_abc" in msg
+        assert "#42" in msg
+
+    @patch("notifications.send_telegram")
+    def test_notify_publish_error_without_correlation_id(self, mock_send):
+        notify_publish_error("42", "Something broke")
+        msg = mock_send.call_args[0][0]
+        assert "Job:" not in msg
+
+    @patch("notifications.send_telegram")
+    def test_notify_partial_success_with_correlation_id(self, mock_send):
+        notify_partial_success("7", "IG:123", "FB: timeout", correlation_id="job_abc")
+        msg = mock_send.call_args[0][0]
+        assert "job_abc" in msg
+
+    @patch("notifications.send_telegram")
+    def test_notify_gbp_error(self, mock_send):
+        notify_gbp_error("10", "http_403", "Forbidden", correlation_id="job_gbp_123")
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "GBP" in msg
+        assert "#10" in msg
+        assert "http_403" in msg
+        assert "Forbidden" in msg
+        assert "job_gbp_123" in msg
+
+    @patch("notifications.send_telegram")
+    def test_notify_gbp_error_escapes_html(self, mock_send):
+        notify_gbp_error("5", "err", '<script>alert("x")</script>')
+        msg = mock_send.call_args[0][0]
+        assert "<script>" not in msg
+        assert "&lt;script&gt;" in msg
+
+    @patch("notifications.send_telegram")
+    def test_notify_processing_timeout(self, mock_send):
+        notify_processing_timeout("15", 10)
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "#15" in msg
+        assert "10" in msg
+        assert "PROCESSING" in msg
 
 
 class TestTruncate:

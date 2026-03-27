@@ -62,23 +62,52 @@ def send_telegram(message: str) -> bool:
     return any_ok
 
 
-def notify_publish_error(row_id: str, error_msg: str):
+def notify_publish_error(row_id: str, error_msg: str, *, correlation_id: str = ""):
     """התראה על כשל בפרסום פוסט."""
-    text = (
-        f"<b>❌ שגיאת פרסום</b>\n"
-        f"<b>פוסט:</b> #{html.escape(str(row_id))}\n"
-        f"<b>שגיאה:</b> {html.escape(_truncate(error_msg, 500))}"
-    )
-    send_telegram(text)
+    lines = [
+        "<b>❌ שגיאת פרסום</b>",
+        f"<b>פוסט:</b> #{html.escape(str(row_id))}",
+    ]
+    if correlation_id:
+        lines.append(f"<b>Job:</b> <code>{html.escape(correlation_id)}</code>")
+    lines.append(f"<b>שגיאה:</b> {html.escape(_truncate(error_msg, 500))}")
+    send_telegram("\n".join(lines))
 
 
-def notify_partial_success(row_id: str, result: str, error_msg: str):
+def notify_partial_success(row_id: str, result: str, error_msg: str, *, correlation_id: str = ""):
     """התראה על הצלחה חלקית (רשת אחת הצליחה, אחרת נכשלה)."""
+    lines = [
+        "<b>⚠️ הצלחה חלקית</b>",
+        f"<b>פוסט:</b> #{html.escape(str(row_id))}",
+    ]
+    if correlation_id:
+        lines.append(f"<b>Job:</b> <code>{html.escape(correlation_id)}</code>")
+    lines.append(f"<b>הצליח:</b> {html.escape(result)}")
+    lines.append(f"<b>נכשל:</b> {html.escape(_truncate(error_msg, 400))}")
+    send_telegram("\n".join(lines))
+
+
+def notify_gbp_error(row_id: str, error_code: str, error_msg: str, *, correlation_id: str = ""):
+    """התראה ייעודית על כשל בפרסום ל-Google Business Profile."""
+    lines = [
+        "<b>📍 שגיאת GBP</b>",
+        f"<b>פוסט:</b> #{html.escape(str(row_id))}",
+    ]
+    if correlation_id:
+        lines.append(f"<b>Job:</b> <code>{html.escape(correlation_id)}</code>")
+    if error_code:
+        lines.append(f"<b>קוד:</b> {html.escape(error_code)}")
+    lines.append(f"<b>שגיאה:</b> {html.escape(_truncate(error_msg, 500))}")
+    send_telegram("\n".join(lines))
+
+
+def notify_processing_timeout(row_id: str, timeout_minutes: int):
+    """התראה על שורה שתקועה ב-PROCESSING מעבר ל-timeout."""
     text = (
-        f"<b>⚠️ הצלחה חלקית</b>\n"
+        f"<b>⏰ Timeout — שורה תקועה</b>\n"
         f"<b>פוסט:</b> #{html.escape(str(row_id))}\n"
-        f"<b>הצליח:</b> {html.escape(result)}\n"
-        f"<b>נכשל:</b> {html.escape(_truncate(error_msg, 400))}"
+        f"<b>זמן:</b> תקועה ב-PROCESSING יותר מ-{timeout_minutes} דקות\n"
+        f"<b>פעולה:</b> השורה שוחררה ותנסה שוב"
     )
     send_telegram(text)
 

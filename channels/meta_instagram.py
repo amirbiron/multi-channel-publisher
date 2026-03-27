@@ -49,8 +49,15 @@ class InstagramChannel(BaseChannel):
                 )
             return self._make_result(success=True, platform_post_id=platform_id)
         except Exception as exc:
+            raw = None
+            if hasattr(exc, "response") and exc.response is not None:
+                try:
+                    raw = {"status": exc.response.status_code, "body": exc.response.text[:1000]}
+                except Exception:
+                    pass
             return self._make_result(
                 success=False,
                 error_code=self.classify_error(exc),
                 error_message=str(exc)[:500],
+                raw_response=raw,
             )

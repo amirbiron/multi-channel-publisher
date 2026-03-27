@@ -296,11 +296,14 @@ def process_row(
         failed = {cid: r for cid, r in publish_results.items() if not r.success}
 
         if failed and not succeeded:
-            # כל הערוצים נכשלו — raise the first error for the outer handler
-            first_fail = list(failed.values())[0]
-            raise RuntimeError(
-                f"{first_fail.channel}: {first_fail.error_message}"
-            )
+            # כל הערוצים נכשלו — build detailed error and raise
+            error_parts = []
+            for cid, r in failed.items():
+                detail = f"{cid}: {r.error_message}"
+                if r.raw_response:
+                    detail += f" | API response: {r.raw_response}"
+                error_parts.append(detail)
+            raise RuntimeError("; ".join(error_parts))
 
         # בניית מחרוזת תוצאה
         is_multi = len(targets) > 1

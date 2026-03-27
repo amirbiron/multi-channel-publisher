@@ -4,6 +4,7 @@ from channels.base import BaseChannel, PublishResult
 from channels.registry import ChannelRegistry
 from channels.meta_instagram import InstagramChannel
 from channels.meta_facebook import FacebookChannel
+from channels.google_business import GoogleBusinessChannel
 
 __all__ = [
     "BaseChannel",
@@ -11,6 +12,7 @@ __all__ = [
     "ChannelRegistry",
     "InstagramChannel",
     "FacebookChannel",
+    "GoogleBusinessChannel",
 ]
 
 
@@ -19,4 +21,5 @@ def create_default_registry() -> ChannelRegistry:
     registry = ChannelRegistry()
     registry.register(InstagramChannel())
     registry.register(FacebookChannel())
+    registry.register(GoogleBusinessChannel())
     return registry

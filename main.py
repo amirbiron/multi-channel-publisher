@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from dateutil import parser as dtparser
@@ -31,7 +32,7 @@ from config import (
     COL_PUBLISHED_CHANNELS,
     COL_FAILED_CHANNELS,
     STATUS_READY,
-    STATUS_IN_PROGRESS,
+    STATUS_PROCESSING,
     STATUS_POSTED,
     STATUS_PARTIAL,
     STATUS_ERROR,
@@ -48,6 +49,10 @@ from config import (
     POST_TYPE_REELS,
     PUBLISH_MAX_RETRIES,
     PUBLISH_RETRY_DELAY,
+    COL_LOCKED_AT,
+    COL_PROCESSING_BY,
+    COL_RETRY_COUNT,
+    LOCK_TIMEOUT_MINUTES,
 )
 from google_api import (
     sheets_read_all_rows,
@@ -71,6 +76,9 @@ logger = logging.getLogger("social-publisher")
 
 # ─── Channel Registry (singleton for the run) ────────────────
 _registry = create_default_registry()
+
+# Unique run identifier — used for processing_by lock field
+_RUN_ID = f"run_{uuid.uuid4().hex[:12]}"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -190,7 +198,7 @@ def process_row(
         # ── שלב 0: אימות נעילה (re-read מהטבלה) ──
         fresh_row = sheets_read_row(sheet_row_number)
         fresh_status = get_cell(fresh_row, header, COL_STATUS).strip().upper()
-        if fresh_status != STATUS_IN_PROGRESS:
+        if fresh_status != STATUS_PROCESSING:
             logger.warning(
                 f"Row {row_id}: Status changed to {fresh_status!r} after locking — "
                 f"another run may have claimed it. Skipping."
@@ -336,10 +344,14 @@ def process_row(
             sheets_update_cells(
                 sheet_row_number,
                 {
-                    COL_STATUS: STATUS_ERROR,
+                    COL_STATUS: STATUS_PARTIAL,
                     COL_CLOUDINARY_URL: cloud_urls_str,
                     COL_RESULT: result_str,
                     COL_ERROR: error_detail[:500],
+                    COL_PUBLISHED_CHANNELS: ",".join(succeeded.keys()),
+                    COL_FAILED_CHANNELS: ",".join(failed.keys()),
+                    COL_LOCKED_AT: "",
+                    COL_PROCESSING_BY: "",
                 },
                 header,
             )
@@ -356,6 +368,8 @@ def process_row(
                     COL_ERROR: skipped_note,
                     COL_PUBLISHED_CHANNELS: ",".join(succeeded.keys()),
                     COL_FAILED_CHANNELS: ",".join(skipped_channels),
+                    COL_LOCKED_AT: "",
+                    COL_PROCESSING_BY: "",
                 },
                 header,
             )
@@ -367,6 +381,10 @@ def process_row(
                     COL_CLOUDINARY_URL: cloud_urls_str,
                     COL_RESULT: result_str,
                     COL_ERROR: "",
+                    COL_PUBLISHED_CHANNELS: ",".join(succeeded.keys()),
+                    COL_FAILED_CHANNELS: "",
+                    COL_LOCKED_AT: "",
+                    COL_PROCESSING_BY: "",
                 },
                 header,
             )
@@ -395,13 +413,17 @@ def process_row(
 
 def _mark_error(header: list[str], sheet_row_number: int, error_msg: str):
     """מסמן שורה כ-ERROR בטבלה."""
-    # חותכים הודעות ארוכות מדי
     if len(error_msg) > 500:
         error_msg = error_msg[:497] + "..."
 
     sheets_update_cells(
         sheet_row_number,
-        {COL_STATUS: STATUS_ERROR, COL_ERROR: error_msg},
+        {
+            COL_STATUS: STATUS_ERROR,
+            COL_ERROR: error_msg,
+            COL_LOCKED_AT: "",
+            COL_PROCESSING_BY: "",
+        },
         header,
     )
 
@@ -485,6 +507,218 @@ def cleanup_old_cloudinary_assets(
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Lock Timeout Recovery
+# ═══════════════════════════════════════════════════════════════
+
+def recover_stale_locks(
+    header: list[str],
+    rows: list[list[str]],
+    now_utc: datetime,
+) -> int:
+    """
+    Reset rows stuck in PROCESSING beyond LOCK_TIMEOUT_MINUTES back to READY.
+    Increments retry_count for each recovered row.
+    Returns the number of rows recovered.
+    """
+    cutoff = now_utc - timedelta(minutes=LOCK_TIMEOUT_MINUTES)
+    recovered = 0
+
+    for i, row in enumerate(rows, start=2):
+        status = get_cell(row, header, COL_STATUS).strip().upper()
+        if status != STATUS_PROCESSING:
+            continue
+
+        locked_at_str = get_cell(row, header, COL_LOCKED_AT).strip()
+        if not locked_at_str:
+            # Legacy row without locked_at — treat as stale
+            pass
+        else:
+            try:
+                locked_at = datetime.fromisoformat(locked_at_str)
+                if locked_at.tzinfo is None:
+                    locked_at = locked_at.replace(tzinfo=timezone.utc)
+                if locked_at > cutoff:
+                    continue  # still within timeout window
+            except (ValueError, TypeError):
+                pass  # unparseable — treat as stale
+
+        row_id = get_cell(row, header, "id", default=str(i))
+        retry_count_str = get_cell(row, header, COL_RETRY_COUNT).strip()
+        retry_count = int(retry_count_str) if retry_count_str.isdigit() else 0
+
+        logger.warning(
+            f"Row {row_id}: PROCESSING lock timed out — resetting to READY "
+            f"(retry_count {retry_count} → {retry_count + 1})"
+        )
+        sheets_update_cells(
+            i,
+            {
+                COL_STATUS: STATUS_READY,
+                COL_LOCKED_AT: "",
+                COL_PROCESSING_BY: "",
+                COL_RETRY_COUNT: str(retry_count + 1),
+            },
+            header,
+        )
+        recovered += 1
+
+    return recovered
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Retry PARTIAL — republish only failed channels
+# ═══════════════════════════════════════════════════════════════
+
+def process_partial_row(
+    row: list[str],
+    header: list[str],
+    sheet_row_number: int,
+) -> bool:
+    """
+    Retry publishing for a PARTIAL row — only republish channels listed
+    in failed_channels, skip already-succeeded channels.
+    Returns True if the row was processed.
+    """
+    row_id = get_cell(row, header, "id", default=str(sheet_row_number))
+    failed_channels_str = get_cell(row, header, COL_FAILED_CHANNELS).strip()
+    published_channels_str = get_cell(row, header, COL_PUBLISHED_CHANNELS).strip()
+
+    if not failed_channels_str:
+        logger.info(f"Row {row_id}: PARTIAL but no failed_channels recorded — skipping retry")
+        return False
+
+    retry_targets = [c.strip() for c in failed_channels_str.split(",") if c.strip()]
+    already_published = set(
+        c.strip() for c in published_channels_str.split(",") if c.strip()
+    )
+
+    # Filter to only registered channels
+    registered_ids = set(_registry.channel_ids)
+    retry_targets = [cid for cid in retry_targets if cid in registered_ids]
+
+    if not retry_targets:
+        logger.info(f"Row {row_id}: No retryable channels registered — skipping")
+        return False
+
+    # Lock the row
+    logger.info(f"Row {row_id}: Retrying PARTIAL — channels: {retry_targets}")
+    sheets_update_cells(
+        sheet_row_number,
+        {
+            COL_STATUS: STATUS_PROCESSING,
+            COL_LOCKED_AT: datetime.now(timezone.utc).isoformat(),
+            COL_PROCESSING_BY: _RUN_ID,
+        },
+        header,
+    )
+
+    # Re-read to verify lock
+    fresh_row = sheets_read_row(sheet_row_number)
+    fresh_status = get_cell(fresh_row, header, COL_STATUS).strip().upper()
+    if fresh_status != STATUS_PROCESSING:
+        logger.warning(f"Row {row_id}: Status changed during lock — skipping")
+        return False
+
+    network = get_cell(row, header, COL_NETWORK).strip().upper()
+    post_type = get_cell(row, header, COL_POST_TYPE).strip().upper() or POST_TYPE_FEED
+    caption_generic = get_cell(row, header, COL_CAPTION)
+    caption_ig = get_cell(row, header, COL_CAPTION_IG) or caption_generic
+    caption_fb = get_cell(row, header, COL_CAPTION_FB) or caption_generic
+    cloud_urls_str = get_cell(row, header, COL_CLOUDINARY_URL).strip()
+    cloud_urls = [u.strip() for u in cloud_urls_str.split(",") if u.strip()]
+
+    # Determine mime types from URLs (best-effort)
+    mime_types = []
+    for url in cloud_urls:
+        if any(url.lower().endswith(ext) for ext in (".mp4", ".mov", ".avi")):
+            mime_types.append("video/mp4")
+        else:
+            mime_types.append("image/jpeg")
+
+    post_data = {
+        "caption": caption_generic,
+        COL_CAPTION_IG: caption_ig,
+        COL_CAPTION_FB: caption_fb,
+        "cloud_urls": cloud_urls,
+        "mime_types": mime_types,
+        "post_type": post_type,
+    }
+
+    # Publish only to failed channels
+    new_results: dict[str, PublishResult] = {}
+    for cid in retry_targets:
+        if cid in already_published:
+            logger.info(f"Row {row_id}: {cid} already published — skipping")
+            continue
+        channel = _registry.get(cid)
+        logger.info(f"Row {row_id}: Retrying {cid} ({channel.CHANNEL_NAME})...")
+        try:
+            new_results[cid] = _publish_channel_with_retry(
+                channel, post_data, row_id=row_id,
+            )
+        except Exception as exc:
+            logger.exception(f"Row {row_id}: Unexpected error retrying {cid}")
+            new_results[cid] = PublishResult(
+                channel=cid,
+                success=False,
+                status="ERROR",
+                error_code="unexpected_error",
+                error_message=str(exc)[:500],
+            )
+
+    # Merge results
+    newly_succeeded = {cid for cid, r in new_results.items() if r.success}
+    still_failed = {cid for cid, r in new_results.items() if not r.success}
+    all_published = already_published | newly_succeeded
+
+    # Build updated result string
+    existing_result = get_cell(row, header, COL_RESULT).strip()
+    new_result_parts = [
+        f"{cid}:{r.platform_post_id}" for cid, r in new_results.items() if r.success
+    ]
+    if new_result_parts:
+        result_str = f"{existing_result} | {' | '.join(new_result_parts)}" if existing_result else " | ".join(new_result_parts)
+    else:
+        result_str = existing_result
+
+    if still_failed:
+        error_parts = [
+            f"{cid}: {new_results[cid].error_message}" for cid in still_failed
+        ]
+        sheets_update_cells(
+            sheet_row_number,
+            {
+                COL_STATUS: STATUS_PARTIAL,
+                COL_RESULT: result_str,
+                COL_ERROR: f"Retry partial. Still failed: {'; '.join(error_parts)}"[:500],
+                COL_PUBLISHED_CHANNELS: ",".join(sorted(all_published)),
+                COL_FAILED_CHANNELS: ",".join(sorted(still_failed)),
+                COL_LOCKED_AT: "",
+                COL_PROCESSING_BY: "",
+            },
+            header,
+        )
+        logger.warning(f"Row {row_id}: Still PARTIAL after retry — {still_failed}")
+    else:
+        sheets_update_cells(
+            sheet_row_number,
+            {
+                COL_STATUS: STATUS_POSTED,
+                COL_RESULT: result_str,
+                COL_ERROR: "",
+                COL_PUBLISHED_CHANNELS: ",".join(sorted(all_published)),
+                COL_FAILED_CHANNELS: "",
+                COL_LOCKED_AT: "",
+                COL_PROCESSING_BY: "",
+            },
+            header,
+        )
+        logger.info(f"Row {row_id}: Retry succeeded — now POSTED ({result_str})")
+
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Main
 # ═══════════════════════════════════════════════════════════════
 
@@ -510,6 +744,25 @@ def main():
 
     logger.info(f"Sheet has {len(rows)} data rows. Header: {header}")
 
+    # ── שחרור נעילות תקועות ──
+    recovered = recover_stale_locks(header, rows, now_utc)
+    if recovered:
+        logger.info(f"Lock recovery: reset {recovered} stale PROCESSING row(s) to READY")
+        # Re-read after recovery so the loop sees updated statuses
+        header, rows = sheets_read_all_rows()
+
+    # ── retry שורות PARTIAL (רק ערוצים שנכשלו) ──
+    partial_retried = 0
+    for i, row in enumerate(rows, start=2):
+        status = get_cell(row, header, COL_STATUS).strip().upper()
+        if status != STATUS_PARTIAL:
+            continue
+        if process_partial_row(row, header, i):
+            partial_retried += 1
+
+    if partial_retried:
+        logger.info(f"Partial retry: processed {partial_retried} PARTIAL row(s)")
+
     # ── סינון שורות שמוכנות לפרסום ──
     processed = 0
     skipped = 0
@@ -532,8 +785,16 @@ def main():
 
         # ── נעילה מיידית לפני עיבוד — מצמצם race condition ──
         row_id = get_cell(row, header, "id", default=str(i))
-        logger.info(f"Row {row_id}: Locking (IN_PROGRESS)")
-        sheets_update_cells(i, {COL_STATUS: STATUS_IN_PROGRESS}, header)
+        logger.info(f"Row {row_id}: Locking (PROCESSING) by {_RUN_ID}")
+        sheets_update_cells(
+            i,
+            {
+                COL_STATUS: STATUS_PROCESSING,
+                COL_LOCKED_AT: datetime.now(timezone.utc).isoformat(),
+                COL_PROCESSING_BY: _RUN_ID,
+            },
+            header,
+        )
 
         # ── מעבד את השורה ──
         if process_row(row, header, i):

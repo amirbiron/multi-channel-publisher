@@ -49,7 +49,7 @@ from config_constants import (
     STATUS_POSTED,
     STATUS_PARTIAL,
     STATUS_ERROR,
-    STATUS_IN_PROGRESS,
+    STATUS_PROCESSING,
     NETWORK_IG,
     NETWORK_FB,
     NETWORK_GBP,
@@ -905,7 +905,7 @@ def api_config():
     return jsonify({
         "driveFolderId": DRIVE_FOLDER_ID,
         "columns": SHEET_COLUMNS,
-        "statuses": [STATUS_DRAFT, STATUS_READY, STATUS_IN_PROGRESS, STATUS_POSTED, STATUS_PARTIAL, STATUS_ERROR],
+        "statuses": [STATUS_DRAFT, STATUS_READY, STATUS_PROCESSING, STATUS_POSTED, STATUS_PARTIAL, STATUS_ERROR],
         "networks": sorted(VALID_NETWORKS),
         "postTypes": [POST_TYPE_FEED, POST_TYPE_REELS],
         "isDev": bool(is_dev),

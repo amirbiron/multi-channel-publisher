@@ -13,7 +13,7 @@ import pytest
 
 from config import (
     TZ_IL,
-    STATUS_READY, STATUS_POSTED, STATUS_ERROR, STATUS_IN_PROGRESS,
+    STATUS_READY, STATUS_POSTED, STATUS_ERROR, STATUS_PROCESSING,
     STATUS_DRAFT, STATUS_PARTIAL,
     NETWORK_GBP, VALID_NETWORKS,
     COL_CAPTION,
@@ -75,8 +75,8 @@ def _make_row_with_publish_at(publish_at, **kwargs):
 
 
 def _in_progress_row(**kwargs):
-    """Build a row with IN_PROGRESS status for lock verification tests."""
-    kwargs.setdefault("status", STATUS_IN_PROGRESS)
+    """Build a row with PROCESSING status for lock verification tests."""
+    kwargs.setdefault("status", STATUS_PROCESSING)
     return _make_row(**kwargs)
 
 
@@ -487,10 +487,12 @@ class TestProcessRowBothNetworks:
         process_row(row, HEADER, 2)
 
         last_call = mock_sheets.call_args_list[-1]
-        assert last_call[0][1]["status"] == STATUS_ERROR
+        assert last_call[0][1]["status"] == STATUS_PARTIAL
         assert "ig_media_888" in last_call[0][1]["result"]
         assert "Partial success" in last_call[0][1]["error"]
         assert "FB" in last_call[0][1]["error"]
+        assert last_call[0][1]["published_channels"] == "IG"
+        assert last_call[0][1]["failed_channels"] == "FB"
 
     @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+FB", caption_ig="cap", caption_fb="cap"))
     @patch("main.sheets_update_cells")
@@ -533,8 +535,8 @@ class TestProcessRowCarousel:
     @patch("main.sheets_update_cells")
     @patch("main.sheets_read_row")
     def test_carousel_reels_rejected(self, mock_read_row, mock_update, mock_notify):
-        mock_read_row.return_value = _make_row(status=STATUS_IN_PROGRESS)
-        row = _make_row(network="IG", post_type="REELS", drive_id="a,b", status=STATUS_IN_PROGRESS)
+        mock_read_row.return_value = _make_row(status=STATUS_PROCESSING)
+        row = _make_row(network="IG", post_type="REELS", drive_id="a,b", status=STATUS_PROCESSING)
 
         process_row(row, HEADER, 2)
 
@@ -557,8 +559,8 @@ class TestProcessRowCarousel:
     @patch("main.sheets_read_row")
     def test_ig_carousel_success(self, mock_read_row, mock_update, mock_drive,
                                   mock_normalize, mock_cloud, mock_ig_car, mock_notify):
-        mock_read_row.return_value = _make_row(status=STATUS_IN_PROGRESS)
-        row = _make_row(network="IG", post_type="FEED", drive_id="fileA,fileB", status=STATUS_IN_PROGRESS)
+        mock_read_row.return_value = _make_row(status=STATUS_PROCESSING)
+        row = _make_row(network="IG", post_type="FEED", drive_id="fileA,fileB", status=STATUS_PROCESSING)
 
         process_row(row, HEADER, 2)
 
@@ -715,7 +717,7 @@ class TestCaptionFallbackToGeneric:
 
 class TestGBPOnlyNetwork:
     @patch("main.sheets_read_row", return_value=_make_row(
-        status=STATUS_IN_PROGRESS, network="GBP",
+        status=STATUS_PROCESSING, network="GBP",
     ))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary")
@@ -732,7 +734,7 @@ class TestGBPOnlyNetwork:
         mock_cloud.assert_not_called()
 
     @patch("main.sheets_read_row", return_value=_make_row(
-        status=STATUS_IN_PROGRESS, network="IG+GBP",
+        status=STATUS_PROCESSING, network="IG+GBP",
     ))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
@@ -757,7 +759,7 @@ class TestGBPOnlyNetwork:
 # ═══════════════════════════════════════════════════════════════
 
 class TestBackwardCompatibility:
-    @patch("main.sheets_read_row", return_value=_make_row(status=STATUS_IN_PROGRESS))
+    @patch("main.sheets_read_row", return_value=_make_row(status=STATUS_PROCESSING))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))

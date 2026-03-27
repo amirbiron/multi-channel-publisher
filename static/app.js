@@ -278,7 +278,7 @@ function renderPosts() {
       postType: postTypeLabel(post.post_type),
       publishAt: formatDateTime(post.publish_at),
       canEdit: status === 'READY' || status === '',
-      canDelete: status !== 'IN_PROGRESS',
+      canDelete: status !== 'PROCESSING',
     };
   });
 
@@ -1139,8 +1139,9 @@ function showToast(message, type = 'info') {
 function statusBadge(status) {
   const map = {
     'READY': { class: 'badge-ready', label: 'ממתין' },
-    'IN_PROGRESS': { class: 'badge-in-progress', label: 'בתהליך' },
+    'PROCESSING': { class: 'badge-in-progress', label: 'בתהליך' },
     'POSTED': { class: 'badge-posted', label: 'פורסם' },
+    'PARTIAL': { class: 'badge-partial', label: 'חלקי' },
     'ERROR': { class: 'badge-error', label: 'שגיאה' },
   };
   const info = map[status] || { class: '', label: escapeHtml(status) || '-' };

@@ -41,7 +41,7 @@ COL_FAILED_CHANNELS = "failed_channels"
 # ─── Status Values ───────────────────────────────────────────
 STATUS_DRAFT = "DRAFT"
 STATUS_READY = "READY"
-STATUS_IN_PROGRESS = "IN_PROGRESS"
+STATUS_PROCESSING = "PROCESSING"
 STATUS_POSTED = "POSTED"
 STATUS_PARTIAL = "PARTIAL"
 STATUS_ERROR = "ERROR"
@@ -78,6 +78,9 @@ SOURCE_AUTO = "auto"
 SOURCE_AI_PANEL = "ai-panel"
 
 # ─── CTA Types (Google Business Profile) ────────────────────
+# ─── Lock Timeout ─────────────────────────────────────────────
+LOCK_TIMEOUT_MINUTES = 10
+
 CTA_LEARN_MORE = "LEARN_MORE"
 CTA_CALL = "CALL"
 CTA_BOOK = "BOOK"

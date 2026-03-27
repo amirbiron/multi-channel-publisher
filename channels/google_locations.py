@@ -113,8 +113,9 @@ class GoogleLocationsService:
 
     def get_location(self, location_id: str) -> dict | None:
         """
-        Return a single location by its resource name (e.g. ``locations/456``),
-        or ``None`` if not found among accessible locations.
+        Return a single location by its resource name, or ``None`` if
+        not found.  Accepts both ``locations/456`` and
+        ``accounts/123/locations/456``.
         """
         locations = self.list_locations()
         for loc in locations:
@@ -190,9 +191,28 @@ class GoogleLocationsService:
         return all_locations
 
     @staticmethod
+    def _normalize_location_id(raw: str) -> str:
+        """Extract the ``locations/Y`` portion from a resource name.
+
+        Accepts both ``locations/Y`` and ``accounts/X/locations/Y``.
+        """
+        prefix = "locations/"
+        idx = raw.rfind(prefix)
+        if idx != -1:
+            return raw[idx:]
+        return raw
+
+    @staticmethod
     def _matches(full_name: str, location_id: str) -> bool:
-        """Check whether *location_id* matches *full_name*."""
-        return full_name == location_id
+        """Check whether *location_id* matches *full_name*.
+
+        Normalises both sides to ``locations/Y`` form so callers can
+        pass either ``accounts/X/locations/Y`` or ``locations/Y``.
+        """
+        return (
+            GoogleLocationsService._normalize_location_id(full_name)
+            == GoogleLocationsService._normalize_location_id(location_id)
+        )
 
 
 class LocationAccessError(Exception):

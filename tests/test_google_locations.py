@@ -260,6 +260,23 @@ class TestMatches:
             "locations/2", "locations/2"
         ) is True
 
+    def test_full_name_against_short(self):
+        """accounts/X/locations/Y should match locations/Y."""
+        assert GoogleLocationsService._matches(
+            "locations/2", "accounts/1/locations/2"
+        ) is True
+
+    def test_short_against_full_name(self):
+        """locations/Y should match accounts/X/locations/Y."""
+        assert GoogleLocationsService._matches(
+            "accounts/1/locations/2", "locations/2"
+        ) is True
+
+    def test_both_full_names_match(self):
+        assert GoogleLocationsService._matches(
+            "accounts/1/locations/2", "accounts/1/locations/2"
+        ) is True
+
     def test_no_match(self):
         assert GoogleLocationsService._matches(
             "locations/2", "locations/999"

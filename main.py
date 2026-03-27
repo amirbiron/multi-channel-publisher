@@ -57,7 +57,7 @@ from google_api import (
 )
 from cloud_storage import upload_to_cloudinary, delete_from_cloudinary
 from media_processor import normalize_media, MediaProcessingError
-from meta_publish import ig_publish_feed, fb_publish_feed, ig_publish_carousel
+from channels import create_default_registry, PublishResult
 from notifications import notify_publish_error, notify_partial_success
 
 # ─── Logging ─────────────────────────────────────────────────
@@ -68,6 +68,9 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 logger = logging.getLogger("social-publisher")
+
+# ─── Channel Registry (singleton for the run) ────────────────
+_registry = create_default_registry()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -107,36 +110,68 @@ def get_cell(row: list[str], header: list[str], col_name: str, default: str = ""
         return default
 
 
+# Map network value → list of channel IDs it includes
+_NETWORK_TO_CHANNELS = {
+    NETWORK_IG: [NETWORK_IG],
+    NETWORK_FB: [NETWORK_FB],
+    NETWORK_GBP: [NETWORK_GBP],
+    NETWORK_BOTH: [NETWORK_IG, NETWORK_FB],
+    NETWORK_IG_GBP: [NETWORK_IG, NETWORK_GBP],
+    NETWORK_FB_GBP: [NETWORK_FB, NETWORK_GBP],
+    NETWORK_ALL_THREE: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
+    NETWORK_ALL: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
+}
+
+
+def _resolve_targets(network: str) -> list[str]:
+    """Resolve network to publishable channel IDs (only registered ones)."""
+    requested = _NETWORK_TO_CHANNELS.get(network, [])
+    registered_ids = set(_registry.channel_ids)
+    return [cid for cid in requested if cid in registered_ids]
+
+
+def _unregistered_channels(network: str) -> list[str]:
+    """Return channel IDs requested by network but not yet registered."""
+    requested = _NETWORK_TO_CHANNELS.get(network, [])
+    registered_ids = set(_registry.channel_ids)
+    return [cid for cid in requested if cid not in registered_ids]
+
+
 # ═══════════════════════════════════════════════════════════════
 #  Process Single Row
 # ═══════════════════════════════════════════════════════════════
 
-def _publish_with_retry(publish_fn, *args, row_id: str, network_name: str) -> str:
+def _publish_channel_with_retry(
+    channel, post_data: dict, *, row_id: str,
+) -> PublishResult:
     """
-    מנסה לפרסם עם retry — עד PUBLISH_MAX_RETRIES ניסיונות.
-    מחזיר את ה-result_id אם הצליח, אחרת מעלה את השגיאה האחרונה.
+    Publish to a single channel with retry logic.
+    Returns a PublishResult (success or error).
     """
     if PUBLISH_MAX_RETRIES < 1:
         raise ValueError("PUBLISH_MAX_RETRIES must be >= 1")
 
-    last_error = None
+    cid = channel.CHANNEL_ID
+    last_result = None
+
     for attempt in range(1, PUBLISH_MAX_RETRIES + 1):
-        try:
-            return publish_fn(*args)
-        except Exception as e:
-            last_error = e
-            if attempt < PUBLISH_MAX_RETRIES:
-                delay = PUBLISH_RETRY_DELAY * (2 ** (attempt - 1))
-                logger.warning(
-                    f"Row {row_id}: {network_name} publish attempt {attempt}/{PUBLISH_MAX_RETRIES} "
-                    f"failed: {e} — retrying in {delay}s..."
-                )
-                time.sleep(delay)
-            else:
-                logger.error(
-                    f"Row {row_id}: {network_name} publish failed after {PUBLISH_MAX_RETRIES} attempts"
-                )
-    raise last_error
+        result = channel.publish(post_data)
+        if result.success:
+            return result
+        last_result = result
+        if attempt < PUBLISH_MAX_RETRIES:
+            delay = PUBLISH_RETRY_DELAY * (2 ** (attempt - 1))
+            logger.warning(
+                f"Row {row_id}: {cid} publish attempt {attempt}/{PUBLISH_MAX_RETRIES} "
+                f"failed: {result.error_message} — retrying in {delay}s..."
+            )
+            time.sleep(delay)
+        else:
+            logger.error(
+                f"Row {row_id}: {cid} publish failed after {PUBLISH_MAX_RETRIES} attempts"
+            )
+
+    return last_result
 
 
 def process_row(
@@ -146,14 +181,13 @@ def process_row(
 ) -> bool:
     """
     מעבד שורה אחת: מאמת נעילה → מוריד → מעלה → מפרסם → מעדכן.
-    תומך ב-network=IG+FB לפרסום לשתי הרשתות מאותה שורה.
+    תומך ב-network מרובה לפרסום לכמה ערוצים מאותה שורה.
     מחזיר True אם השורה עובדה בפועל, False אם דולגה.
     """
     row_id = get_cell(row, header, "id", default=str(sheet_row_number))
 
     try:
         # ── שלב 0: אימות נעילה (re-read מהטבלה) ──
-        # בודקים שהסטטוס אכן IN_PROGRESS — אם ריצה מקבילה כבר תפסה את השורה, מדלגים
         fresh_row = sheets_read_row(sheet_row_number)
         fresh_status = get_cell(fresh_row, header, COL_STATUS).strip().upper()
         if fresh_status != STATUS_IN_PROGRESS:
@@ -179,19 +213,17 @@ def process_row(
             return True
 
         # ── בדיקת ערוצי יעד לפני I/O — מונע העלאות מיותרות ──
-        targets = []
-        if network in (NETWORK_IG, NETWORK_BOTH, NETWORK_IG_GBP, NETWORK_ALL_THREE, NETWORK_ALL):
-            targets.append(NETWORK_IG)
-        if network in (NETWORK_FB, NETWORK_BOTH, NETWORK_FB_GBP, NETWORK_ALL_THREE, NETWORK_ALL):
-            targets.append(NETWORK_FB)
-        # GBP publishing will be handled by the channel layer (Task 5+).
-        has_gbp = network in (NETWORK_GBP, NETWORK_IG_GBP, NETWORK_FB_GBP, NETWORK_ALL_THREE, NETWORK_ALL)
-        if has_gbp:
-            logger.info(f"Row {row_id}: GBP channel not yet implemented — skipping GBP target")
+        targets = _resolve_targets(network)
+        skipped_channels = _unregistered_channels(network)
+        for cid in skipped_channels:
+            logger.info(f"Row {row_id}: {cid} channel not yet implemented — skipping")
 
         if not targets:
-            # GBP-only row — nothing to publish yet; exit before expensive I/O
-            _mark_error(header, sheet_row_number, "GBP channel not yet implemented")
+            # All requested channels are unregistered (e.g. GBP-only)
+            _mark_error(
+                header, sheet_row_number,
+                f"{', '.join(skipped_channels)} channel not yet implemented",
+            )
             return True
 
         # ── פירוק drive_file_id — תמיכה בקבצים מרובים (קרוסלה) ──
@@ -240,68 +272,64 @@ def process_row(
         # שמירת כל ה-URLs לטבלה (מופרדים בפסיק)
         cloud_urls_str = ",".join(cloud_urls)
 
-        # ── שלב 4: פרסום ──
-        results = {}
-        errors = {}
+        # ── שלב 4: פרסום דרך ה-registry ──
+        # Build post_data dict that channels understand
+        post_data = {
+            "caption": caption_generic,
+            COL_CAPTION_IG: caption_ig,
+            COL_CAPTION_FB: caption_fb,
+            "cloud_urls": cloud_urls,
+            "mime_types": mime_types,
+            "post_type": post_type,
+        }
 
-        for target in targets:
-            if target == NETWORK_IG:
-                caption = caption_ig or caption_fb
-                if is_carousel:
-                    logger.info(f"Row {row_id}: Publishing carousel to Instagram ({len(cloud_urls)} items)...")
-                    try:
-                        results[NETWORK_IG] = _publish_with_retry(
-                            ig_publish_carousel, cloud_urls, caption, mime_types,
-                            row_id=row_id, network_name="IG",
-                        )
-                    except Exception as e:
-                        errors[NETWORK_IG] = e
-                else:
-                    logger.info(f"Row {row_id}: Publishing to Instagram ({post_type})...")
-                    try:
-                        results[NETWORK_IG] = _publish_with_retry(
-                            ig_publish_feed, cloud_urls[0], caption, mime_types[0], post_type,
-                            row_id=row_id, network_name="IG",
-                        )
-                    except Exception as e:
-                        errors[NETWORK_IG] = e
-            else:
-                caption = caption_fb or caption_ig
-                if is_carousel:
-                    # FB קרוסלה דורשת pages_manage_posts approved — fallback לתמונה ראשונה
-                    logger.info(f"Row {row_id}: FB carousel not supported — publishing first item only...")
-                    try:
-                        results[NETWORK_FB] = _publish_with_retry(
-                            fb_publish_feed, cloud_urls[0], caption, mime_types[0], post_type,
-                            row_id=row_id, network_name="FB",
-                        )
-                    except Exception as e:
-                        errors[NETWORK_FB] = e
-                else:
-                    logger.info(f"Row {row_id}: Publishing to Facebook ({post_type})...")
-                    try:
-                        results[NETWORK_FB] = _publish_with_retry(
-                            fb_publish_feed, cloud_urls[0], caption, mime_types[0], post_type,
-                            row_id=row_id, network_name="FB",
-                        )
-                    except Exception as e:
-                        errors[NETWORK_FB] = e
+        publish_results: dict[str, PublishResult] = {}
+        for cid in targets:
+            channel = _registry.get(cid)
+            logger.info(f"Row {row_id}: Publishing to {cid} ({channel.CHANNEL_NAME})...")
+            try:
+                publish_results[cid] = _publish_channel_with_retry(
+                    channel, post_data, row_id=row_id,
+                )
+            except Exception as exc:
+                logger.exception(f"Row {row_id}: Unexpected error publishing to {cid}")
+                publish_results[cid] = PublishResult(
+                    channel=cid,
+                    success=False,
+                    status="ERROR",
+                    error_code="unexpected_error",
+                    error_message=str(exc)[:500],
+                )
 
         # ── שלב 5: סימון תוצאה ──
-        if errors and not results:
-            # כל הרשתות נכשלו
-            raise list(errors.values())[0]
+        succeeded = {cid: r for cid, r in publish_results.items() if r.success}
+        failed = {cid: r for cid, r in publish_results.items() if not r.success}
+
+        if failed and not succeeded:
+            # כל הערוצים נכשלו — build detailed error and raise
+            error_parts = []
+            for cid, r in failed.items():
+                detail = f"{cid}: {r.error_message}"
+                if r.raw_response:
+                    detail += f" | API response: {r.raw_response}"
+                error_parts.append(detail)
+            raise RuntimeError("; ".join(error_parts))
 
         # בניית מחרוזת תוצאה
         is_multi = len(targets) > 1
-        result_parts = [f"{net}:{rid}" for net, rid in results.items()]
-        result_str = " | ".join(result_parts) if is_multi else str(list(results.values())[0])
+        result_parts = [
+            f"{cid}:{r.platform_post_id}" for cid, r in succeeded.items()
+        ]
+        result_str = (
+            " | ".join(result_parts) if is_multi
+            else str(list(succeeded.values())[0].platform_post_id)
+        )
 
-        if errors:
-            # הצלחה חלקית — מסמנים ERROR עם פירוט מה הצליח ומה נכשל
-            error_parts = []
-            for net, err in errors.items():
-                error_parts.append(f"{net}: {err}")
+        if failed:
+            # הצלחה חלקית בערוצים שפורסמו
+            error_parts = [
+                f"{cid}: {r.error_message}" for cid, r in failed.items()
+            ]
             error_detail = f"Partial success ({result_str}). Failures: {'; '.join(error_parts)}"
             logger.warning(f"Row {row_id}: PARTIAL — {error_detail}")
             notify_partial_success(row_id, result_str, "; ".join(error_parts))
@@ -315,20 +343,19 @@ def process_row(
                 },
                 header,
             )
-        elif has_gbp:
-            # IG/FB succeeded but GBP was skipped — mark PARTIAL so these
-            # rows can be retried once GBP is implemented
-            gbp_note = "GBP: skipped (not yet implemented)"
-            logger.warning(f"Row {row_id}: PARTIAL — {result_str} | {gbp_note}")
+        elif skipped_channels:
+            # All registered channels succeeded, but some were skipped
+            skipped_note = f"{','.join(skipped_channels)}: skipped (not yet implemented)"
+            logger.warning(f"Row {row_id}: PARTIAL — {result_str} | {skipped_note}")
             sheets_update_cells(
                 sheet_row_number,
                 {
                     COL_STATUS: STATUS_PARTIAL,
                     COL_CLOUDINARY_URL: cloud_urls_str,
                     COL_RESULT: result_str,
-                    COL_ERROR: gbp_note,
-                    COL_PUBLISHED_CHANNELS: ",".join(results.keys()),
-                    COL_FAILED_CHANNELS: "GBP",
+                    COL_ERROR: skipped_note,
+                    COL_PUBLISHED_CHANNELS: ",".join(succeeded.keys()),
+                    COL_FAILED_CHANNELS: ",".join(skipped_channels),
                 },
                 header,
             )
@@ -463,7 +490,8 @@ def cleanup_old_cloudinary_assets(
 
 def main():
     logger.info("═" * 50)
-    logger.info("Social Publisher — Run started")
+    logger.info("Multi-Channel Publisher — Run started")
+    logger.info(f"Registered channels: {_registry.channel_ids}")
     logger.info("═" * 50)
 
     now_utc = datetime.now(timezone.utc)

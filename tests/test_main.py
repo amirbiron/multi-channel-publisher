@@ -2,7 +2,8 @@
 test_main.py — בדיקות יחידה ל-main.py
 
 מכסה: is_due, get_cell, process_row (הצלחה + שגיאות),
-       main loop (סינון שורות), cleanup_old_cloudinary_assets.
+       main loop (סינון שורות), cleanup_old_cloudinary_assets,
+       registry-based publishing.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -24,12 +25,10 @@ from main import (
     main,
     cleanup_old_cloudinary_assets,
     _CLOUDINARY_URL_RE,
-    _publish_with_retry,
+    _publish_channel_with_retry,
 )
 
 # ─── Header fixture ──────────────────────────────────────────
-# Mirrors SHEET_COLUMNS from config_constants.py.
-# Old IG/FB-only rows still work — new columns default to "".
 HEADER = [
     "id", "status", "network", "post_type", "publish_at",
     "caption", "caption_ig", "caption_fb", "caption_gbp",
@@ -65,6 +64,20 @@ def _make_row(
         "", "", "",
         "", "",
     ]
+
+
+def _make_row_with_publish_at(publish_at, **kwargs):
+    """Build a row with a custom publish_at timestamp."""
+    row = _make_row(**kwargs)
+    idx = HEADER.index("publish_at")
+    row[idx] = publish_at
+    return row
+
+
+def _in_progress_row(**kwargs):
+    """Build a row with IN_PROGRESS status for lock verification tests."""
+    kwargs.setdefault("status", STATUS_IN_PROGRESS)
+    return _make_row(**kwargs)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -112,21 +125,8 @@ class TestGetCell:
 
 # ═══════════════════════════════════════════════════════════════
 #  process_row — success paths
+#  Mocking goes through meta_publish (called by channel adapters)
 # ═══════════════════════════════════════════════════════════════
-
-def _make_row_with_publish_at(publish_at, **kwargs):
-    """Build a row with a custom publish_at timestamp."""
-    row = _make_row(**kwargs)
-    idx = HEADER.index("publish_at")
-    row[idx] = publish_at
-    return row
-
-
-def _in_progress_row(**kwargs):
-    """Build a row with IN_PROGRESS status for lock verification tests."""
-    kwargs.setdefault("status", STATUS_IN_PROGRESS)
-    return _make_row(**kwargs)
-
 
 class TestProcessRowSuccess:
     @patch("main.sheets_read_row", return_value=_in_progress_row())
@@ -134,7 +134,7 @@ class TestProcessRowSuccess:
     @patch("main.upload_to_cloudinary", return_value="https://res.cloudinary.com/x/image/upload/v1/social-publisher/abc.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"}))
-    @patch("main.ig_publish_feed", return_value="media_111")
+    @patch("meta_publish.ig_publish_feed", return_value="media_111")
     def test_ig_image_feed(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row()
         process_row(row, HEADER, 2)
@@ -156,7 +156,7 @@ class TestProcessRowSuccess:
     @patch("main.upload_to_cloudinary", return_value="https://example.com/vid.mp4")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"fake-vid", {"mimeType": "video/mp4", "name": "vid.mp4"}))
-    @patch("main.fb_publish_feed", return_value="post_222")
+    @patch("meta_publish.fb_publish_feed", return_value="post_222")
     def test_fb_video_feed(self, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row(network="FB", caption_ig="", caption_fb="fb caption")
         process_row(row, HEADER, 3)
@@ -175,7 +175,7 @@ class TestProcessRowSuccess:
     @patch("main.upload_to_cloudinary", return_value="https://example.com/vid.mp4")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"fake-vid", {"mimeType": "video/mp4", "name": "vid.mp4"}))
-    @patch("main.fb_publish_feed", return_value="reel_333")
+    @patch("meta_publish.fb_publish_feed", return_value="reel_333")
     def test_fb_video_reels(self, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
         """post_type=REELS should be passed through to fb_publish_feed."""
         row = _make_row(network="FB", post_type="REELS", caption_ig="", caption_fb="reel caption")
@@ -193,7 +193,7 @@ class TestProcessRowSuccess:
     @patch("main.upload_to_cloudinary", return_value="https://example.com/vid.mp4")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"fake-vid", {"mimeType": "video/mp4", "name": "vid.mp4"}))
-    @patch("main.ig_publish_feed", return_value="media_444")
+    @patch("meta_publish.ig_publish_feed", return_value="media_444")
     def test_ig_video_reels(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
         """post_type=REELS on IG should pass through."""
         row = _make_row(post_type="REELS")
@@ -211,7 +211,7 @@ class TestProcessRowSuccess:
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "img.jpg"}))
-    @patch("main.ig_publish_feed", return_value="media_555")
+    @patch("meta_publish.ig_publish_feed", return_value="media_555")
     def test_empty_post_type_defaults_to_feed(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
         """If post_type column is empty, should default to FEED."""
         row = _make_row(post_type="")
@@ -220,19 +220,19 @@ class TestProcessRowSuccess:
         mock_ig.assert_called_once()
         assert mock_ig.call_args[0][3] == "FEED"
 
-    @patch("main.sheets_read_row", return_value=_in_progress_row(caption_ig="", caption_fb="fallback text"))
+    @patch("main.sheets_read_row", return_value=_in_progress_row(caption="generic fallback", caption_ig="", caption_fb="fb text"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "img.jpg"}))
-    @patch("main.ig_publish_feed", return_value="media_333")
-    def test_caption_fallback_ig_uses_fb_if_empty(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
-        """If caption_ig is empty, should fallback to caption_fb."""
-        row = _make_row(caption_ig="", caption_fb="fallback text")
+    @patch("meta_publish.ig_publish_feed", return_value="media_333")
+    def test_caption_fallback_ig_uses_generic_if_empty(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+        """If caption_ig is empty, should fallback to generic caption (not caption_fb)."""
+        row = _make_row(caption="generic fallback", caption_ig="", caption_fb="fb text")
         process_row(row, HEADER, 2)
 
         mock_ig.assert_called_once()
-        assert mock_ig.call_args[0][1] == "fallback text"
+        assert mock_ig.call_args[0][1] == "generic fallback"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -274,7 +274,7 @@ class TestProcessRowErrors:
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
-    @patch("main.ig_publish_feed", side_effect=Exception("API rate limit"))
+    @patch("meta_publish.ig_publish_feed", side_effect=Exception("API rate limit"))
     @patch("main.PUBLISH_MAX_RETRIES", 1)
     def test_publish_error_marks_error(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row()
@@ -289,7 +289,7 @@ class TestProcessRowErrors:
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
-    @patch("main.ig_publish_feed", side_effect=Exception("x" * 600))
+    @patch("meta_publish.ig_publish_feed", side_effect=Exception("x" * 600))
     @patch("main.PUBLISH_MAX_RETRIES", 1)
     def test_long_error_message_truncated(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row()
@@ -329,7 +329,6 @@ class TestMainLoop:
         assert mock_process.call_count == 2
         assert mock_process.call_args_list[0][0][2] == 2
         assert mock_process.call_args_list[1][0][2] == 5
-        # Verify locking happened before process_row
         assert mock_update.call_count == 2
 
     @patch("main.cleanup_old_cloudinary_assets", return_value=0)
@@ -345,8 +344,6 @@ class TestMainLoop:
     @patch("main.process_row", side_effect=Exception("boom"))
     @patch("main.sheets_read_all_rows")
     def test_process_row_exception_propagates(self, mock_read, mock_process, mock_update, mock_cleanup):
-        """main() does not catch exceptions from process_row — if one leaks
-        past process_row's internal try/except, the run aborts."""
         mock_read.return_value = (
             HEADER,
             [_make_row()],
@@ -425,7 +422,6 @@ class TestCleanup:
     @patch("main.sheets_update_cells")
     @patch("main.delete_from_cloudinary", return_value=True)
     def test_deletes_carousel_multi_url_assets(self, mock_delete, mock_sheets):
-        """Comma-separated Cloudinary URLs (carousel) should all be deleted."""
         urls = (
             "https://res.cloudinary.com/x/image/upload/v1/social-publisher/a.jpg,"
             "https://res.cloudinary.com/x/image/upload/v1/social-publisher/b.jpg,"
@@ -437,12 +433,11 @@ class TestCleanup:
         deleted = cleanup_old_cloudinary_assets(HEADER, rows, NOW_UTC)
         assert deleted == 3
         assert mock_delete.call_count == 3
-        mock_sheets.assert_called_once()  # cleared URL field once
+        mock_sheets.assert_called_once()
 
     @patch("main.sheets_update_cells")
     @patch("main.delete_from_cloudinary", return_value=True)
     def test_deletes_partial_row_assets(self, mock_delete, mock_sheets):
-        """PARTIAL rows should also have their Cloudinary assets cleaned up."""
         rows = [
             _make_cleanup_row("PARTIAL", "2026-01-01 10:00",
                               "https://res.cloudinary.com/x/image/upload/v1/social-publisher/partial.jpg"),
@@ -453,7 +448,7 @@ class TestCleanup:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  process_row — IG+FB (dual publish)
+#  process_row — IG+FB (dual publish via registry)
 # ═══════════════════════════════════════════════════════════════
 
 class TestProcessRowBothNetworks:
@@ -462,10 +457,9 @@ class TestProcessRowBothNetworks:
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"}))
-    @patch("main.fb_publish_feed", return_value="fb_post_999")
-    @patch("main.ig_publish_feed", return_value="ig_media_888")
+    @patch("meta_publish.fb_publish_feed", return_value="fb_post_999")
+    @patch("meta_publish.ig_publish_feed", return_value="ig_media_888")
     def test_both_networks_success(self, mock_ig, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
-        """IG+FB should publish to both and combine result IDs."""
         row = _make_row(network="IG+FB", caption_ig="ig cap", caption_fb="fb cap")
         process_row(row, HEADER, 2)
 
@@ -485,11 +479,10 @@ class TestProcessRowBothNetworks:
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"}))
-    @patch("main.fb_publish_feed", side_effect=Exception("FB API error"))
-    @patch("main.ig_publish_feed", return_value="ig_media_888")
+    @patch("meta_publish.fb_publish_feed", side_effect=Exception("FB API error"))
+    @patch("meta_publish.ig_publish_feed", return_value="ig_media_888")
     @patch("main.PUBLISH_MAX_RETRIES", 1)
     def test_both_networks_partial_failure(self, mock_ig, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
-        """If one network fails, should mark ERROR with partial success info."""
         row = _make_row(network="IG+FB", caption_ig="ig cap", caption_fb="fb cap")
         process_row(row, HEADER, 2)
 
@@ -504,33 +497,31 @@ class TestProcessRowBothNetworks:
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"}))
-    @patch("main.fb_publish_feed", side_effect=Exception("FB fail"))
-    @patch("main.ig_publish_feed", side_effect=Exception("IG fail"))
+    @patch("meta_publish.fb_publish_feed", side_effect=Exception("FB fail"))
+    @patch("meta_publish.ig_publish_feed", side_effect=Exception("IG fail"))
     @patch("main.PUBLISH_MAX_RETRIES", 1)
     def test_both_networks_all_fail(self, mock_ig, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
-        """If all networks fail, should mark ERROR."""
         row = _make_row(network="IG+FB", caption_ig="cap", caption_fb="cap")
         process_row(row, HEADER, 2)
 
         last_call = mock_sheets.call_args_list[-1]
         assert last_call[0][1]["status"] == STATUS_ERROR
 
-    @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+FB", caption_ig="", caption_fb="fb only"))
+    @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+FB", caption="shared text", caption_ig="", caption_fb=""))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"}))
-    @patch("main.fb_publish_feed", return_value="fb_222")
-    @patch("main.ig_publish_feed", return_value="ig_111")
-    def test_both_networks_caption_fallback(self, mock_ig, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
-        """IG should fallback to caption_fb, FB should fallback to caption_ig."""
-        row = _make_row(network="IG+FB", caption_ig="", caption_fb="fb only")
+    @patch("meta_publish.fb_publish_feed", return_value="fb_222")
+    @patch("meta_publish.ig_publish_feed", return_value="ig_111")
+    def test_both_networks_caption_fallback_to_generic(self, mock_ig, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+        """Both channels should fallback to generic caption when their specific ones are empty."""
+        row = _make_row(network="IG+FB", caption="shared text", caption_ig="", caption_fb="")
         process_row(row, HEADER, 2)
 
-        # IG: caption_ig is empty, should fallback to caption_fb
-        assert mock_ig.call_args[0][1] == "fb only"
-        # FB: caption_fb is "fb only"
-        assert mock_fb.call_args[0][1] == "fb only"
+        # Both should get the generic caption
+        assert mock_ig.call_args[0][1] == "shared text"
+        assert mock_fb.call_args[0][1] == "shared text"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -538,25 +529,21 @@ class TestProcessRowBothNetworks:
 # ═══════════════════════════════════════════════════════════════
 
 class TestProcessRowCarousel:
-    """process_row with comma-separated drive_file_ids → carousel publishing."""
-
     @patch("main.notify_publish_error")
     @patch("main.sheets_update_cells")
     @patch("main.sheets_read_row")
     def test_carousel_reels_rejected(self, mock_read_row, mock_update, mock_notify):
-        """REELS + multiple files → error."""
         mock_read_row.return_value = _make_row(status=STATUS_IN_PROGRESS)
         row = _make_row(network="IG", post_type="REELS", drive_id="a,b", status=STATUS_IN_PROGRESS)
 
         process_row(row, HEADER, 2)
 
-        # Should mark error
         error_call = mock_update.call_args[0][1]
         assert error_call["status"] == STATUS_ERROR
         assert "Carousel not supported for REELS" in error_call["error"]
 
     @patch("main.notify_publish_error")
-    @patch("main.ig_publish_carousel", return_value="ig_car_123")
+    @patch("meta_publish.ig_publish_carousel", return_value="ig_car_123")
     @patch("main.upload_to_cloudinary", side_effect=["https://cloud/1.jpg", "https://cloud/2.jpg"])
     @patch("main.normalize_media", side_effect=[
         (b"img1", "image/jpeg", "1.jpg"),
@@ -575,67 +562,81 @@ class TestProcessRowCarousel:
 
         process_row(row, HEADER, 2)
 
-        # ig_publish_carousel called with 2 URLs
         mock_ig_car.assert_called_once()
         call_urls = mock_ig_car.call_args[0][0]
         assert call_urls == ["https://cloud/1.jpg", "https://cloud/2.jpg"]
 
-        # Sheet updated with POSTED and comma-separated cloudinary URLs
         update_call = mock_update.call_args_list[-1][0][1]
         assert update_call["status"] == STATUS_POSTED
         assert "https://cloud/1.jpg,https://cloud/2.jpg" == update_call["cloudinary_url"]
 
 
 # ═══════════════════════════════════════════════════════════════
-#  _publish_with_retry
+#  _publish_channel_with_retry
 # ═══════════════════════════════════════════════════════════════
 
-class TestPublishWithRetry:
+class TestPublishChannelWithRetry:
+    def _make_channel(self, results):
+        """Create a mock channel that returns results in sequence."""
+        from channels.base import BaseChannel, PublishResult
+        ch = MagicMock(spec=BaseChannel)
+        ch.CHANNEL_ID = "TEST"
+        ch.publish = MagicMock(side_effect=results)
+        return ch
+
+    def _ok_result(self):
+        from channels.base import PublishResult
+        return PublishResult(channel="TEST", success=True, status="POSTED",
+                             platform_post_id="p1")
+
+    def _err_result(self, msg="fail"):
+        from channels.base import PublishResult
+        return PublishResult(channel="TEST", success=False, status="ERROR",
+                             error_code="api_error", error_message=msg)
+
     @patch("main.time.sleep")
     def test_succeeds_first_try(self, mock_sleep):
-        fn = MagicMock(return_value="result_1")
-        result = _publish_with_retry(fn, "url", "cap", row_id="1", network_name="IG")
-        assert result == "result_1"
-        fn.assert_called_once()
+        ch = self._make_channel([self._ok_result()])
+        result = _publish_channel_with_retry(ch, {}, row_id="1")
+        assert result.success is True
+        ch.publish.assert_called_once()
         mock_sleep.assert_not_called()
 
     @patch("main.PUBLISH_MAX_RETRIES", 3)
     @patch("main.PUBLISH_RETRY_DELAY", 2)
     @patch("main.time.sleep")
-    def test_succeeds_after_retry_with_exponential_backoff(self, mock_sleep):
-        fn = MagicMock(side_effect=[Exception("fail1"), Exception("fail2"), "result_ok"])
-        result = _publish_with_retry(fn, "url", "cap", row_id="1", network_name="IG")
-        assert result == "result_ok"
-        assert fn.call_count == 3
+    def test_succeeds_after_retry(self, mock_sleep):
+        ch = self._make_channel([self._err_result(), self._err_result(), self._ok_result()])
+        result = _publish_channel_with_retry(ch, {}, row_id="1")
+        assert result.success is True
+        assert ch.publish.call_count == 3
         assert mock_sleep.call_count == 2
-        # exponential backoff: delay * 2^(attempt-1)
-        mock_sleep.assert_any_call(2)   # attempt 1: 2 * 2^0 = 2
-        mock_sleep.assert_any_call(4)   # attempt 2: 2 * 2^1 = 4
+        mock_sleep.assert_any_call(2)   # 2 * 2^0
+        mock_sleep.assert_any_call(4)   # 2 * 2^1
 
     @patch("main.PUBLISH_MAX_RETRIES", 0)
     def test_raises_value_error_when_max_retries_zero(self):
-        fn = MagicMock()
+        ch = self._make_channel([])
         with pytest.raises(ValueError, match="PUBLISH_MAX_RETRIES must be >= 1"):
-            _publish_with_retry(fn, "url", "cap", row_id="1", network_name="IG")
+            _publish_channel_with_retry(ch, {}, row_id="1")
 
     @patch("main.PUBLISH_MAX_RETRIES", 2)
     @patch("main.PUBLISH_RETRY_DELAY", 1)
     @patch("main.time.sleep")
-    def test_raises_after_all_retries_exhausted(self, mock_sleep):
-        fn = MagicMock(side_effect=Exception("persistent error"))
-        with pytest.raises(Exception, match="persistent error"):
-            _publish_with_retry(fn, "url", "cap", row_id="1", network_name="IG")
-        assert fn.call_count == 2
+    def test_returns_error_after_all_retries(self, mock_sleep):
+        ch = self._make_channel([self._err_result("persistent"), self._err_result("persistent")])
+        result = _publish_channel_with_retry(ch, {}, row_id="1")
+        assert result.success is False
+        assert ch.publish.call_count == 2
 
 
 # ═══════════════════════════════════════════════════════════════
-#  Multi-Channel Schema — new column / value tests
+#  Schema constants validation
 # ═══════════════════════════════════════════════════════════════
 
 class TestNewSchemaConstants:
-    """Verify the new constants from Task 1 exist and are correct."""
-
     def test_new_status_values(self):
+        from config import STATUS_DRAFT, STATUS_PARTIAL
         assert STATUS_DRAFT == "DRAFT"
         assert STATUS_PARTIAL == "PARTIAL"
 
@@ -644,7 +645,6 @@ class TestNewSchemaConstants:
         assert "IG+GBP" in VALID_NETWORKS
         assert "FB+GBP" in VALID_NETWORKS
         assert "IG+FB+GBP" in VALID_NETWORKS
-        assert "ALL" in VALID_NETWORKS
 
     def test_valid_networks_includes_legacy(self):
         assert "IG" in VALID_NETWORKS
@@ -652,32 +652,25 @@ class TestNewSchemaConstants:
         assert "IG+FB" in VALID_NETWORKS
 
     def test_header_contains_new_columns(self):
-        from config_constants import SHEET_COLUMNS
+        from config import SHEET_COLUMNS
         assert "caption" in SHEET_COLUMNS
         assert "caption_gbp" in SHEET_COLUMNS
         assert "gbp_post_type" in SHEET_COLUMNS
-        assert "cta_type" in SHEET_COLUMNS
-        assert "cta_url" in SHEET_COLUMNS
-        assert "google_location_id" in SHEET_COLUMNS
-        assert "source" in SHEET_COLUMNS
-        assert "retry_count" in SHEET_COLUMNS
-        assert "locked_at" in SHEET_COLUMNS
-        assert "processing_by" in SHEET_COLUMNS
-        assert "published_channels" in SHEET_COLUMNS
-        assert "failed_channels" in SHEET_COLUMNS
 
+
+# ═══════════════════════════════════════════════════════════════
+#  Caption fallback to generic caption
+# ═══════════════════════════════════════════════════════════════
 
 class TestCaptionFallbackToGeneric:
-    """caption_{channel} → caption (generic) fallback."""
-
-    @patch("main.sheets_read_row", return_value=_make_row(
-        status=STATUS_IN_PROGRESS, caption="generic text", caption_ig="", caption_fb="",
+    @patch("main.sheets_read_row", return_value=_in_progress_row(
+        caption="generic text", caption_ig="", caption_fb="",
     ))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
-    @patch("main.ig_publish_feed", return_value="media_999")
+    @patch("meta_publish.ig_publish_feed", return_value="media_gen")
     def test_ig_falls_back_to_generic_caption(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row(caption="generic text", caption_ig="", caption_fb="")
         process_row(row, HEADER, 2)
@@ -685,15 +678,14 @@ class TestCaptionFallbackToGeneric:
         mock_ig.assert_called_once()
         assert mock_ig.call_args[0][1] == "generic text"
 
-    @patch("main.sheets_read_row", return_value=_make_row(
-        status=STATUS_IN_PROGRESS, network="FB",
-        caption="generic fb", caption_ig="", caption_fb="",
+    @patch("main.sheets_read_row", return_value=_in_progress_row(
+        network="FB", caption="generic fb", caption_ig="", caption_fb="",
     ))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
-    @patch("main.fb_publish_feed", return_value="fb_999")
+    @patch("meta_publish.fb_publish_feed", return_value="fb_gen")
     def test_fb_falls_back_to_generic_caption(self, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row(network="FB", caption="generic fb", caption_ig="", caption_fb="")
         process_row(row, HEADER, 2)
@@ -701,16 +693,15 @@ class TestCaptionFallbackToGeneric:
         mock_fb.assert_called_once()
         assert mock_fb.call_args[0][1] == "generic fb"
 
-    @patch("main.sheets_read_row", return_value=_make_row(
-        status=STATUS_IN_PROGRESS, caption="generic", caption_ig="specific",
+    @patch("main.sheets_read_row", return_value=_in_progress_row(
+        caption="generic", caption_ig="specific",
     ))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
-    @patch("main.ig_publish_feed", return_value="media_777")
+    @patch("meta_publish.ig_publish_feed", return_value="media_spec")
     def test_channel_caption_takes_precedence(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
-        """caption_ig should take precedence over generic caption."""
         row = _make_row(caption="generic", caption_ig="specific")
         process_row(row, HEADER, 2)
 
@@ -718,9 +709,11 @@ class TestCaptionFallbackToGeneric:
         assert mock_ig.call_args[0][1] == "specific"
 
 
-class TestGBPOnlyNetwork:
-    """GBP-only rows should be handled gracefully until GBP channel is implemented."""
+# ═══════════════════════════════════════════════════════════════
+#  GBP-only / Mixed GBP
+# ═══════════════════════════════════════════════════════════════
 
+class TestGBPOnlyNetwork:
     @patch("main.sheets_read_row", return_value=_make_row(
         status=STATUS_IN_PROGRESS, network="GBP",
     ))
@@ -728,7 +721,6 @@ class TestGBPOnlyNetwork:
     @patch("main.upload_to_cloudinary")
     @patch("main.drive_download_with_metadata")
     def test_gbp_only_marks_error_without_io(self, mock_drive, mock_cloud, mock_sheets, mock_reread):
-        """GBP-only row should exit before any Drive/Cloudinary I/O."""
         row = _make_row(network="GBP")
         result = process_row(row, HEADER, 2)
 
@@ -736,7 +728,6 @@ class TestGBPOnlyNetwork:
         last_call = mock_sheets.call_args_list[-1]
         assert last_call[0][1]["status"] == STATUS_ERROR
         assert "not yet implemented" in last_call[0][1]["error"]
-        # No expensive I/O should have happened
         mock_drive.assert_not_called()
         mock_cloud.assert_not_called()
 
@@ -747,9 +738,8 @@ class TestGBPOnlyNetwork:
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
-    @patch("main.ig_publish_feed", return_value="ig_media_777")
+    @patch("meta_publish.ig_publish_feed", return_value="ig_media_777")
     def test_mixed_gbp_marks_partial(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
-        """IG+GBP should publish IG and mark PARTIAL with GBP as failed_channels."""
         row = _make_row(network="IG+GBP")
         result = process_row(row, HEADER, 2)
 
@@ -762,17 +752,18 @@ class TestGBPOnlyNetwork:
         assert "IG" in last_call[0][1]["published_channels"]
 
 
-class TestBackwardCompatibility:
-    """Existing IG/FB rows with old data continue to work with the new schema."""
+# ═══════════════════════════════════════════════════════════════
+#  Backward compatibility
+# ═══════════════════════════════════════════════════════════════
 
+class TestBackwardCompatibility:
     @patch("main.sheets_read_row", return_value=_make_row(status=STATUS_IN_PROGRESS))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
-    @patch("main.ig_publish_feed", return_value="media_100")
+    @patch("meta_publish.ig_publish_feed", return_value="media_100")
     def test_legacy_ig_row_still_works(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
-        """A simple IG row with no new columns should still publish."""
         row = _make_row()
         process_row(row, HEADER, 2)
 

@@ -342,11 +342,27 @@ def _normalize_publish_at(value: str) -> str:
         return value  # pass through unparseable values as-is
 
 
+def _validate_gbp_fields(data: dict) -> str | None:
+    """Return an error message if GBP fields are invalid, or None if OK."""
+    network = data.get(COL_NETWORK, "")
+    if NETWORK_GBP in network.split("+"):
+        location_id = data.get(COL_GOOGLE_LOCATION_ID, "").strip()
+        if not location_id:
+            return "google_location_id is required when GBP is selected"
+    return None
+
+
 @app.route("/api/posts", methods=["POST"])
 def api_create_post():
     """יצירת פוסט חדש (שורה חדשה בטבלה)."""
     try:
         data = request.json
+
+        # Validate: GBP requires google_location_id
+        err = _validate_gbp_fields(data)
+        if err:
+            return jsonify({"error": err}), 400
+
         header, rows = sheets_read_all_rows()
 
         if not header:
@@ -425,6 +441,12 @@ def api_update_post(row_number):
 
     try:
         data = request.json
+
+        # Validate: GBP requires google_location_id
+        err = _validate_gbp_fields(data)
+        if err:
+            return jsonify({"error": err}), 400
+
         header, rows = sheets_read_all_rows()
 
         if not header:
@@ -496,7 +518,7 @@ def api_delete_post(row_number):
 def api_gbp_locations():
     """מחזיר רשימת מיקומי GBP זמינים."""
     try:
-        from channels.google_locations import get_locations_service, LocationFetchError
+        from channels.google_locations import get_locations_service
         svc = get_locations_service()
         locations = svc.list_locations()
         return jsonify({

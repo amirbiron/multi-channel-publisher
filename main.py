@@ -56,8 +56,13 @@ from google_api import (
 from cloud_storage import upload_to_cloudinary, delete_from_cloudinary
 from media_processor import normalize_media, MediaProcessingError
 from channels import create_default_registry, PublishResult
-from notifications import notify_publish_error, notify_partial_success
+from notifications import notify_publish_error, notify_partial_success, notify_gbp_error, notify_processing_timeout
 from validator import RowValidator, ValidationReport, format_validation_error, format_blocked_channels_error
+from publish_logger import (
+    generate_correlation_id,
+    PublishEventLogger,
+    SecretMaskingFilter,
+)
 
 # ─── Logging ─────────────────────────────────────────────────
 logging.basicConfig(
@@ -66,6 +71,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
+# Apply secret masking to all log output
+for _handler in logging.root.handlers:
+    _handler.addFilter(SecretMaskingFilter())
 logger = logging.getLogger("social-publisher")
 
 # ─── Channel Registry (singleton for the run) ────────────────
@@ -126,6 +134,7 @@ def _row_to_dict(row: list[str], header: list[str]) -> dict[str, str]:
 
 def _publish_channel_with_retry(
     channel, post_data: dict, *, row_id: str,
+    event_logger: PublishEventLogger | None = None,
 ) -> PublishResult:
     """
     Publish to a single channel with retry logic.
@@ -161,6 +170,11 @@ def _publish_channel_with_retry(
                 f"Row {row_id}: {cid} publish attempt {attempt}/{PUBLISH_MAX_RETRIES} "
                 f"failed: {result.error_message} — retrying in {delay}s..."
             )
+            if event_logger:
+                event_logger.log_retry(
+                    cid, attempt, PUBLISH_MAX_RETRIES,
+                    result.error_message or "",
+                )
             time.sleep(delay)
         else:
             logger.error(
@@ -181,6 +195,9 @@ def process_row(
     מחזיר True אם השורה עובדה בפועל, False אם דולגה.
     """
     row_id = get_cell(row, header, "id", default=str(sheet_row_number))
+
+    correlation_id = generate_correlation_id()
+    event_logger = PublishEventLogger(correlation_id=correlation_id, post_row_id=row_id)
 
     try:
         # ── שלב 0: אימות נעילה (re-read מהטבלה) ──
@@ -274,12 +291,16 @@ def process_row(
         }
 
         publish_results: dict[str, PublishResult] = {}
+        event_logger.log_job_start(targets)
         for cid in targets:
             channel = _registry.get(cid)
+            location_id = post_data.get(COL_GOOGLE_LOCATION_ID, "") if cid == "GBP" else ""
             logger.info(f"Row {row_id}: Publishing to {cid} ({channel.CHANNEL_NAME})...")
+            event_logger.log_channel_start(cid, location_id=location_id)
             try:
                 publish_results[cid] = _publish_channel_with_retry(
                     channel, post_data, row_id=row_id,
+                    event_logger=event_logger,
                 )
             except Exception as exc:
                 logger.exception(f"Row {row_id}: Unexpected error publishing to {cid}")
@@ -290,6 +311,15 @@ def process_row(
                     error_code="unexpected_error",
                     error_message=str(exc)[:500],
                 )
+            r = publish_results[cid]
+            event_logger.log_channel_end(
+                cid,
+                success=r.success,
+                location_id=location_id,
+                platform_post_id=r.platform_post_id,
+                error_code=r.error_code,
+                error_message=r.error_message,
+            )
 
         # ── שלב 4: סימון תוצאה ──
         succeeded = {cid: r for cid, r in publish_results.items() if r.success}
@@ -338,7 +368,12 @@ def process_row(
                         error_parts.append(f"{cid}: [{issue.code}] {issue.message}")
             error_detail = f"Partial success. Failures: {'; '.join(error_parts)}"
             logger.warning(f"Row {row_id}: PARTIAL — {error_detail}")
-            notify_partial_success(row_id, result_str, "; ".join(error_parts))
+            event_logger.log_job_end(success=False, summary=error_detail[:200])
+            notify_partial_success(row_id, result_str, "; ".join(error_parts), correlation_id=correlation_id)
+            # GBP-specific alert
+            for cid, r in failed.items():
+                if cid == "GBP":
+                    notify_gbp_error(row_id, r.error_code or "", r.error_message or "", correlation_id=correlation_id)
             sheets_update_cells(
                 sheet_row_number,
                 {
@@ -356,6 +391,7 @@ def process_row(
         elif skipped_channels:
             # All registered channels succeeded, but some were skipped
             skipped_note = f"{','.join(skipped_channels)}: skipped (not yet implemented)"
+            event_logger.log_job_end(success=False, summary=skipped_note)
             logger.warning(f"Row {row_id}: PARTIAL — {result_str} | {skipped_note}")
             sheets_update_cells(
                 sheet_row_number,
@@ -386,6 +422,7 @@ def process_row(
                 },
                 header,
             )
+            event_logger.log_job_end(success=True, summary=result_str)
             logger.info(f"Row {row_id}: POSTED successfully ({result_str})")
 
     except Exception as e:
@@ -400,7 +437,8 @@ def process_row(
             except Exception:
                 pass
         logger.error(f"Row {row_id}: ERROR — {error_detail}", exc_info=True)
-        notify_publish_error(row_id, error_detail)
+        event_logger.log_job_end(success=False, summary=error_detail[:200])
+        notify_publish_error(row_id, error_detail, correlation_id=correlation_id)
         try:
             _mark_error(header, sheet_row_number, error_detail)
         except Exception as mark_err:
@@ -555,6 +593,7 @@ def recover_stale_locks(
             f"Row {row_id}: PROCESSING lock timed out — resetting to {restore_status} "
             f"(retry_count {retry_count} → {retry_count + 1})"
         )
+        notify_processing_timeout(row_id, LOCK_TIMEOUT_MINUTES)
         sheets_update_cells(
             i,
             {

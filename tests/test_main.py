@@ -713,10 +713,10 @@ class TestGBPOnlyNetwork:
         status=STATUS_IN_PROGRESS, network="GBP",
     ))
     @patch("main.sheets_update_cells")
-    @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
-    @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
-    def test_gbp_only_marks_error(self, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    @patch("main.upload_to_cloudinary")
+    @patch("main.drive_download_with_metadata")
+    def test_gbp_only_marks_error_without_io(self, mock_drive, mock_cloud, mock_sheets, mock_reread):
+        """GBP-only row should exit before any Drive/Cloudinary I/O."""
         row = _make_row(network="GBP")
         result = process_row(row, HEADER, 2)
 
@@ -724,6 +724,30 @@ class TestGBPOnlyNetwork:
         last_call = mock_sheets.call_args_list[-1]
         assert last_call[0][1]["status"] == STATUS_ERROR
         assert "not yet implemented" in last_call[0][1]["error"]
+        # No expensive I/O should have happened
+        mock_drive.assert_not_called()
+        mock_cloud.assert_not_called()
+
+    @patch("main.sheets_read_row", return_value=_make_row(
+        status=STATUS_IN_PROGRESS, network="IG+GBP",
+    ))
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
+    @patch("main.ig_publish_feed", return_value="ig_media_777")
+    def test_mixed_gbp_marks_partial(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+        """IG+GBP should publish IG and mark PARTIAL with GBP as failed_channels."""
+        row = _make_row(network="IG+GBP")
+        result = process_row(row, HEADER, 2)
+
+        assert result is True
+        mock_ig.assert_called_once()
+        last_call = mock_sheets.call_args_list[-1]
+        assert last_call[0][1]["status"] == STATUS_PARTIAL
+        assert "GBP" in last_call[0][1]["error"]
+        assert last_call[0][1]["failed_channels"] == "GBP"
+        assert "IG" in last_call[0][1]["published_channels"]
 
 
 class TestBackwardCompatibility:

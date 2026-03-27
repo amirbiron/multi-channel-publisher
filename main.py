@@ -186,6 +186,22 @@ def process_row(
             _mark_error(header, sheet_row_number, f"Unknown network: {network}")
             return True
 
+        # ── בדיקת ערוצי יעד לפני I/O — מונע העלאות מיותרות ──
+        targets = []
+        if network in (NETWORK_IG, NETWORK_BOTH, NETWORK_IG_GBP, NETWORK_ALL_THREE, NETWORK_ALL):
+            targets.append(NETWORK_IG)
+        if network in (NETWORK_FB, NETWORK_BOTH, NETWORK_FB_GBP, NETWORK_ALL_THREE, NETWORK_ALL):
+            targets.append(NETWORK_FB)
+        # GBP publishing will be handled by the channel layer (Task 5+).
+        has_gbp = network in (NETWORK_GBP, NETWORK_IG_GBP, NETWORK_FB_GBP, NETWORK_ALL_THREE, NETWORK_ALL)
+        if has_gbp:
+            logger.info(f"Row {row_id}: GBP channel not yet implemented — skipping GBP target")
+
+        if not targets:
+            # GBP-only row — nothing to publish yet; exit before expensive I/O
+            _mark_error(header, sheet_row_number, "GBP channel not yet implemented")
+            return True
+
         # ── פירוק drive_file_id — תמיכה בקבצים מרובים (קרוסלה) ──
         drive_file_ids = [fid.strip() for fid in drive_file_id.split(",") if fid.strip()]
         if not drive_file_ids:
@@ -233,22 +249,6 @@ def process_row(
         cloud_urls_str = ",".join(cloud_urls)
 
         # ── שלב 4: פרסום ──
-        targets = []
-        if network in (NETWORK_IG, NETWORK_BOTH, NETWORK_IG_GBP, NETWORK_ALL_THREE, NETWORK_ALL):
-            targets.append(NETWORK_IG)
-        if network in (NETWORK_FB, NETWORK_BOTH, NETWORK_FB_GBP, NETWORK_ALL_THREE, NETWORK_ALL):
-            targets.append(NETWORK_FB)
-        # GBP publishing will be handled by the channel layer (Task 5+).
-        # For now, GBP-only rows are skipped with a clear message.
-        has_gbp = network in (NETWORK_GBP, NETWORK_IG_GBP, NETWORK_FB_GBP, NETWORK_ALL_THREE, NETWORK_ALL)
-        if has_gbp:
-            logger.info(f"Row {row_id}: GBP channel not yet implemented — skipping GBP target")
-
-        if not targets:
-            # GBP-only row — nothing to publish yet
-            _mark_error(header, sheet_row_number, "GBP channel not yet implemented")
-            return True
-
         results = {}
         errors = {}
 
@@ -320,6 +320,23 @@ def process_row(
                     COL_CLOUDINARY_URL: cloud_urls_str,
                     COL_RESULT: result_str,
                     COL_ERROR: error_detail[:500],
+                },
+                header,
+            )
+        elif has_gbp:
+            # IG/FB succeeded but GBP was skipped — mark PARTIAL so these
+            # rows can be retried once GBP is implemented
+            gbp_note = "GBP: skipped (not yet implemented)"
+            logger.warning(f"Row {row_id}: PARTIAL — {result_str} | {gbp_note}")
+            sheets_update_cells(
+                sheet_row_number,
+                {
+                    COL_STATUS: STATUS_PARTIAL,
+                    COL_CLOUDINARY_URL: cloud_urls_str,
+                    COL_RESULT: result_str,
+                    COL_ERROR: gbp_note,
+                    COL_PUBLISHED_CHANNELS: ",".join(results.keys()),
+                    COL_FAILED_CHANNELS: "GBP",
                 },
                 header,
             )

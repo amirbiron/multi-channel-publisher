@@ -726,14 +726,25 @@ def process_partial_row(
         all_published = already_published | newly_succeeded
 
         # Build updated result string — same CHANNEL:STATUS:detail format as process_row
+        # Remove stale entries for retried channels before appending new results
         existing_result = get_cell(row, header, COL_RESULT).strip()
-        new_result_parts = [
-            f"{cid}:POSTED:{r.platform_post_id}" for cid, r in new_results.items() if r.success
-        ]
-        if new_result_parts:
-            result_str = f"{existing_result} | {' | '.join(new_result_parts)}" if existing_result else " | ".join(new_result_parts)
+        retried_cids = set(new_results.keys())
+        if existing_result:
+            kept_parts = [
+                part.strip() for part in existing_result.split("|")
+                if part.strip().split(":")[0] not in retried_cids
+            ]
         else:
-            result_str = existing_result
+            kept_parts = []
+
+        new_result_parts = []
+        for cid, r in new_results.items():
+            if r.success:
+                new_result_parts.append(f"{cid}:POSTED:{r.platform_post_id}")
+            else:
+                new_result_parts.append(f"{cid}:ERROR:{r.error_code}")
+
+        result_str = " | ".join(kept_parts + new_result_parts)
 
         if still_failed:
             error_parts = [

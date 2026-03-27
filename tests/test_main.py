@@ -22,6 +22,7 @@ from main import (
     is_due,
     get_cell,
     process_row,
+    process_partial_row,
     main,
     cleanup_old_cloudinary_assets,
     _CLOUDINARY_URL_RE,
@@ -860,6 +861,92 @@ class TestGBPOnlyNetwork:
         assert last_call[0][1]["status"] == STATUS_PARTIAL
         assert "GBP" in last_call[0][1]["failed_channels"]
         assert "IG" in last_call[0][1]["published_channels"]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  process_partial_row — retry replaces stale ERROR entries
+# ═══════════════════════════════════════════════════════════════
+
+def _make_partial_row(
+    published_channels="IG",
+    failed_channels="FB",
+    result="IG:POSTED:ig_111 | FB:ERROR:api_error",
+    cloudinary_url="https://example.com/img.jpg",
+    **kwargs,
+):
+    """Build a PARTIAL row for retry tests."""
+    kwargs.setdefault("status", STATUS_PARTIAL)
+    kwargs.setdefault("processing_by", "")
+    kwargs.setdefault("network", "IG+FB")
+    kwargs.setdefault("caption_ig", "ig cap")
+    kwargs.setdefault("caption_fb", "fb cap")
+    row = _make_row(**kwargs)
+    row[HEADER.index("result")] = result
+    row[HEADER.index("cloudinary_url")] = cloudinary_url
+    row[HEADER.index("published_channels")] = published_channels
+    row[HEADER.index("failed_channels")] = failed_channels
+    return row
+
+
+def _locked_partial_row(**kwargs):
+    """Build a PARTIAL row that passes the lock verification check."""
+    row = _make_partial_row(status=STATUS_PROCESSING, processing_by=_RUN_ID, **kwargs)
+    return row
+
+
+class TestProcessPartialRow:
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("meta_publish.fb_publish_feed", return_value="fb_post_222")
+    @patch("main.PUBLISH_MAX_RETRIES", 1)
+    def test_retry_replaces_stale_error(self, mock_fb, mock_sheets, mock_reread):
+        """After retry success, the stale FB:ERROR entry should be replaced by FB:POSTED."""
+        row = _make_partial_row()
+        mock_reread.return_value = _locked_partial_row()
+
+        process_partial_row(row, HEADER, 2)
+
+        last_call = mock_sheets.call_args_list[-1]
+        result_str = last_call[0][1]["result"]
+        assert "FB:POSTED:fb_post_222" in result_str
+        assert "FB:ERROR" not in result_str
+        assert "IG:POSTED:ig_111" in result_str
+        assert last_call[0][1]["status"] == STATUS_POSTED
+
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("meta_publish.fb_publish_feed", side_effect=Exception("still broken"))
+    @patch("main.PUBLISH_MAX_RETRIES", 1)
+    def test_retry_updates_error_entry(self, mock_fb, mock_sheets, mock_reread):
+        """After retry failure, the ERROR entry should be refreshed (not duplicated)."""
+        row = _make_partial_row()
+        mock_reread.return_value = _locked_partial_row()
+
+        process_partial_row(row, HEADER, 2)
+
+        last_call = mock_sheets.call_args_list[-1]
+        result_str = last_call[0][1]["result"]
+        # Should have exactly one FB entry, not two
+        fb_entries = [p.strip() for p in result_str.split("|") if p.strip().startswith("FB:")]
+        assert len(fb_entries) == 1
+        assert fb_entries[0].startswith("FB:ERROR:")
+
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("meta_publish.fb_publish_feed", return_value="fb_222")
+    @patch("main.PUBLISH_MAX_RETRIES", 1)
+    def test_retry_skips_already_published(self, mock_fb, mock_sheets, mock_reread):
+        """Channels in published_channels should not be re-published."""
+        row = _make_partial_row(published_channels="IG", failed_channels="IG,FB")
+        mock_reread.return_value = _locked_partial_row(
+            published_channels="IG", failed_channels="IG,FB",
+        )
+
+        process_partial_row(row, HEADER, 2)
+
+        # IG was in already_published → should NOT call ig_publish
+        # FB was in failed_channels and not in already_published → should call
+        mock_fb.assert_called_once()
 
 
 # ═══════════════════════════════════════════════════════════════

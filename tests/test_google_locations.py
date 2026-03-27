@@ -33,13 +33,13 @@ from channels.google_locations import (
 FAKE_LOCATIONS = [
     {
         "name": "accounts/111/locations/AAA",
-        "locationName": "Downtown Branch",
-        "address": {"locality": "Tel Aviv"},
+        "title": "Downtown Branch",
+        "storefrontAddress": {"locality": "Tel Aviv"},
     },
     {
         "name": "accounts/111/locations/BBB",
-        "locationName": "North Branch",
-        "address": {"locality": "Haifa"},
+        "title": "North Branch",
+        "storefrontAddress": {"locality": "Haifa"},
     },
 ]
 
@@ -193,7 +193,7 @@ class TestGetLocation:
         loc = svc.get_location("accounts/111/locations/AAA")
 
         assert loc is not None
-        assert loc["locationName"] == "Downtown Branch"
+        assert loc["title"] == "Downtown Branch"
 
     @patch("channels.google_locations.requests.get")
     def test_get_by_short_name(self, mock_get):
@@ -203,7 +203,7 @@ class TestGetLocation:
         loc = svc.get_location("locations/AAA")
 
         assert loc is not None
-        assert loc["locationName"] == "Downtown Branch"
+        assert loc["title"] == "Downtown Branch"
 
     @patch("channels.google_locations.requests.get")
     def test_get_nonexistent_returns_none(self, mock_get):
@@ -227,7 +227,7 @@ class TestValidateLocationAccess:
         svc = GoogleLocationsService("accounts/111", _make_auth_mock())
         loc = svc.validate_location_access("locations/BBB")
 
-        assert loc["locationName"] == "North Branch"
+        assert loc["title"] == "North Branch"
 
     @patch("channels.google_locations.requests.get")
     def test_invalid_location_raises(self, mock_get):
@@ -257,7 +257,7 @@ class TestValidateLocationAccess:
         svc = GoogleLocationsService("accounts/111", _make_auth_mock())
 
         with pytest.raises(LocationAccessError, match="google_location_id is required"):
-            svc.validate_location_access("")
+            svc.validate_location_access(None)
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -19,8 +19,8 @@ from channels.google_auth import GoogleOAuthManager, get_oauth_manager
 
 logger = logging.getLogger(__name__)
 
-# GBP (My Business) API base
-_GBP_API_BASE = "https://mybusiness.googleapis.com/v4"
+# GBP Business Profile API base (v1 — replaces deprecated mybusiness.googleapis.com/v4)
+_GBP_API_BASE = "https://mybusinessbusinessinformation.googleapis.com/v1"
 
 # Default cache TTL in seconds (5 minutes)
 _CACHE_TTL_SECONDS = 300
@@ -95,8 +95,8 @@ class GoogleLocationsService:
 
             {
                 "name": "accounts/123/locations/456",
-                "locationName": "My Business — Downtown",
-                "address": { ... },
+                "title": "My Business — Downtown",
+                "storefrontAddress": { ... },
                 ...
             }
         """
@@ -126,7 +126,7 @@ class GoogleLocationsService:
                 return loc
         return None
 
-    def validate_location_access(self, location_id: str) -> dict:
+    def validate_location_access(self, location_id: str | None) -> dict:
         """
         Verify that *location_id* is among the accessible locations.
 
@@ -161,7 +161,9 @@ class GoogleLocationsService:
         page_token: str | None = None
 
         while True:
-            params: dict[str, str] = {}
+            params: dict[str, str] = {
+                "readMask": "name,title,storefrontAddress",
+            }
             if page_token:
                 params["pageToken"] = page_token
 

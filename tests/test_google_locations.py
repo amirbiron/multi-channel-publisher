@@ -32,12 +32,12 @@ from channels.google_locations import (
 
 FAKE_LOCATIONS = [
     {
-        "name": "accounts/111/locations/AAA",
+        "name": "locations/AAA",
         "title": "Downtown Branch",
         "storefrontAddress": {"locality": "Tel Aviv"},
     },
     {
-        "name": "accounts/111/locations/BBB",
+        "name": "locations/BBB",
         "title": "North Branch",
         "storefrontAddress": {"locality": "Haifa"},
     },
@@ -123,7 +123,7 @@ class TestListLocations:
         result = svc.list_locations()
 
         assert len(result) == 2
-        assert result[0]["name"] == "accounts/111/locations/AAA"
+        assert result[0]["name"] == "locations/AAA"
         mock_get.assert_called_once()
 
     @patch("channels.google_locations.requests.get")
@@ -187,16 +187,6 @@ class TestListLocations:
 class TestGetLocation:
     @patch("channels.google_locations.requests.get")
     def test_get_by_full_name(self, mock_get):
-        mock_get.return_value = _mock_locations_response(FAKE_LOCATIONS)
-
-        svc = GoogleLocationsService("accounts/111", _make_auth_mock())
-        loc = svc.get_location("accounts/111/locations/AAA")
-
-        assert loc is not None
-        assert loc["title"] == "Downtown Branch"
-
-    @patch("channels.google_locations.requests.get")
-    def test_get_by_short_name(self, mock_get):
         mock_get.return_value = _mock_locations_response(FAKE_LOCATIONS)
 
         svc = GoogleLocationsService("accounts/111", _make_auth_mock())
@@ -267,35 +257,18 @@ class TestValidateLocationAccess:
 class TestMatches:
     def test_exact_match(self):
         assert GoogleLocationsService._matches(
-            "accounts/1/locations/2", "accounts/1/locations/2"
-        ) is True
-
-    def test_short_form_match(self):
-        assert GoogleLocationsService._matches(
-            "accounts/1/locations/2", "locations/2"
+            "locations/2", "locations/2"
         ) is True
 
     def test_no_match(self):
         assert GoogleLocationsService._matches(
-            "accounts/1/locations/2", "locations/999"
+            "locations/2", "locations/999"
         ) is False
 
     def test_bare_id_no_match(self):
         """A bare number should not match (must have 'locations/' prefix)."""
         assert GoogleLocationsService._matches(
-            "accounts/1/locations/2", "2"
-        ) is False
-
-    def test_partial_segment_no_match(self):
-        """Partial path segments like 'ons/2' must not match."""
-        assert GoogleLocationsService._matches(
-            "accounts/1/locations/2", "ons/2"
-        ) is False
-
-    def test_cross_boundary_no_match(self):
-        """'1/locations/2' must not match (not a clean segment boundary)."""
-        assert GoogleLocationsService._matches(
-            "accounts/1/locations/2", "1/locations/2"
+            "locations/2", "2"
         ) is False
 
 

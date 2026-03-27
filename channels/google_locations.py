@@ -94,7 +94,7 @@ class GoogleLocationsService:
         Each location dict contains at least::
 
             {
-                "name": "accounts/123/locations/456",
+                "name": "locations/456",
                 "title": "My Business — Downtown",
                 "storefrontAddress": { ... },
                 ...
@@ -115,10 +115,6 @@ class GoogleLocationsService:
         """
         Return a single location by its resource name (e.g. ``locations/456``),
         or ``None`` if not found among accessible locations.
-
-        The *location_id* can be either:
-        - a full name: ``accounts/123/locations/456``
-        - a short name: ``locations/456``
         """
         locations = self.list_locations()
         for loc in locations:
@@ -195,17 +191,8 @@ class GoogleLocationsService:
 
     @staticmethod
     def _matches(full_name: str, location_id: str) -> bool:
-        """
-        Check whether *location_id* matches *full_name*.
-
-        Supports both ``accounts/X/locations/Y`` and ``locations/Y``.
-        """
-        if full_name == location_id:
-            return True
-        # Allow only the "locations/Y" short form
-        if location_id.startswith("locations/") and full_name.endswith("/" + location_id):
-            return True
-        return False
+        """Check whether *location_id* matches *full_name*."""
+        return full_name == location_id
 
 
 class LocationAccessError(Exception):

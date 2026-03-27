@@ -97,7 +97,14 @@ async function loadPosts(silent = false) {
 function getFilteredPosts() {
   return posts.filter(post => {
     const status = (post.status || '').toUpperCase();
-    if (filters.status && status !== filters.status) return false;
+
+    // Special meta-filter: failures = ERROR + PARTIAL
+    if (filters.status === '_FAILURES') {
+      if (status !== 'ERROR' && status !== 'PARTIAL') return false;
+    } else if (filters.status && status !== filters.status) {
+      return false;
+    }
+
     if (filters.network && (post.network || '') !== filters.network) return false;
 
     if (filters.dateFrom || filters.dateTo) {
@@ -117,7 +124,8 @@ function getFilteredPosts() {
       const q = filters.search.toLowerCase();
       const inIg = (post.caption_ig || '').toLowerCase().includes(q);
       const inFb = (post.caption_fb || '').toLowerCase().includes(q);
-      if (!inIg && !inFb) return false;
+      const inGbp = (post.caption_gbp || '').toLowerCase().includes(q);
+      if (!inIg && !inFb && !inGbp) return false;
     }
 
     return true;
@@ -240,7 +248,7 @@ function renderPosts() {
     // Show "no results" only when filters are active but no posts match
     if (posts.length > 0 && filtered.length === 0) {
       showElement('posts-table-wrapper');
-      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:var(--space-2xl); color:var(--color-text-muted)">לא נמצאו פוסטים לפי הסינון הנוכחי</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:var(--space-2xl); color:var(--color-text-muted)">לא נמצאו פוסטים לפי הסינון הנוכחי</td></tr>`;
       if (cardsEl) {
         cardsEl.classList.remove('hidden');
         cardsEl.innerHTML = `<div class="post-card-empty">לא נמצאו פוסטים לפי הסינון הנוכחי</div>`;
@@ -270,6 +278,8 @@ function renderPosts() {
   // Pre-compute shared values once per post
   const prepared = pageItems.map(post => {
     const status = (post.status || '').toUpperCase();
+    const failedChannels = (post.failed_channels || '').split(',').map(s => s.trim()).filter(Boolean);
+    const hasFailures = status === 'PARTIAL' || status === 'ERROR';
     return {
       post,
       status,
@@ -277,13 +287,16 @@ function renderPosts() {
       network: networkLabel(post.network),
       postType: postTypeLabel(post.post_type),
       publishAt: formatDateTime(post.publish_at),
-      canEdit: status === 'READY' || status === '',
+      canEdit: status === 'READY' || status === 'DRAFT' || status === '',
       canDelete: status !== 'PROCESSING',
+      channelResults: channelResultsHtml(post),
+      failedChannels,
+      hasFailures,
     };
   });
 
   // ── Desktop table ──
-  tbody.innerHTML = prepared.map(({ post, badge, network, postType, publishAt, canEdit, canDelete }) => {
+  tbody.innerHTML = prepared.map(({ post, badge, network, postType, publishAt, canEdit, canDelete, channelResults, failedChannels, hasFailures }) => {
     const captionIg = truncate(post.caption_ig, 40);
     const captionFb = truncate(post.caption_fb, 40);
 
@@ -304,6 +317,23 @@ function renderPosts() {
          </div>`
       : '<span style="color:var(--color-text-muted)">-</span>';
 
+    // Retry buttons for failed channels
+    let retryHtml = '';
+    if (hasFailures && failedChannels.length > 0) {
+      const retryBtns = failedChannels.map(ch =>
+        `<button class="btn btn-retry btn-sm" onclick="retryChannel(${post._row}, '${escapeHtml(ch)}')" title="נסה שוב ${escapeHtml(ch)}">&#8635; ${escapeHtml(ch)}</button>`
+      ).join('');
+      const retryAllBtn = failedChannels.length > 1
+        ? `<button class="btn btn-retry-all btn-sm" onclick="retryAllFailed(${post._row})" title="נסה שוב הכל">&#8635; הכל</button>`
+        : '';
+      retryHtml = `<div class="retry-actions">${retryBtns}${retryAllBtn}</div>`;
+    }
+
+    // Results cell: channel statuses + retry
+    const resultsCell = channelResults || retryHtml
+      ? `${channelResults}${retryHtml}`
+      : '<span style="color:var(--color-text-muted)">-</span>';
+
     return `<tr>
       <td>${escapeHtml(post.id || '')}</td>
       <td>${badge}</td>
@@ -313,6 +343,7 @@ function renderPosts() {
       <td class="cell-caption ${post.caption_ig ? 'cell-clickable' : ''}" ${post.caption_ig ? `onclick="openCaptionModal('קפשן IG', this.dataset.full)" data-full="${escapeHtml(post.caption_ig)}"` : ''} title="${escapeHtml(post.caption_ig || '')}">${captionIg}</td>
       <td class="cell-caption ${post.caption_fb ? 'cell-clickable' : ''}" ${post.caption_fb ? `onclick="openCaptionModal('קפשן FB', this.dataset.full)" data-full="${escapeHtml(post.caption_fb)}"` : ''} title="${escapeHtml(post.caption_fb || '')}">${captionFb}</td>
       <td class="cell-file">${fileCell}</td>
+      <td class="cell-results">${resultsCell}</td>
       <td class="cell-actions">
         ${canEdit ? `<button class="btn btn-ghost btn-sm" onclick="openEditModal(${post._row})" title="עריכה">&#9998;</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="duplicatePost(${post._row})" title="שכפול">&#128203;</button>
@@ -324,7 +355,7 @@ function renderPosts() {
 
   // ── Mobile cards ──
   if (cardsEl) {
-    cardsEl.innerHTML = prepared.map(({ post, badge, network, postType, publishAt, canEdit, canDelete }) => {
+    cardsEl.innerHTML = prepared.map(({ post, badge, network, postType, publishAt, canEdit, canDelete, channelResults, failedChannels, hasFailures }) => {
       const mFileIds = (post.drive_file_id || '').split(',').map(s => s.trim()).filter(Boolean);
       const mFirstId = mFileIds[0] || '';
       const mIsMulti = mFileIds.length > 1;
@@ -355,6 +386,26 @@ function renderPosts() {
            </div>`
         : '';
 
+      // Channel results + retry for mobile
+      let resultsPart = '';
+      if (channelResults || hasFailures) {
+        let retryMobileHtml = '';
+        if (hasFailures && failedChannels.length > 0) {
+          const retryBtns = failedChannels.map(ch =>
+            `<button class="btn btn-retry btn-sm" onclick="retryChannel(${post._row}, '${escapeHtml(ch)}')">&#8635; ${escapeHtml(ch)}</button>`
+          ).join('');
+          const retryAllBtn = failedChannels.length > 1
+            ? `<button class="btn btn-retry-all btn-sm" onclick="retryAllFailed(${post._row})">&#8635; הכל</button>`
+            : '';
+          retryMobileHtml = `<div class="retry-actions">${retryBtns}${retryAllBtn}</div>`;
+        }
+        resultsPart = `<div class="post-card-divider"></div>
+          <div>
+            <span class="post-card-label">תוצאות</span>
+            ${channelResults}${retryMobileHtml}
+          </div>`;
+      }
+
       return `<div class="post-card">
         <div class="post-card-row">
           <div>${badge}</div>
@@ -378,6 +429,7 @@ function renderPosts() {
         ${captionIgPart}
         ${captionFbPart}
         ${filePart}
+        ${resultsPart}
         <div class="post-card-divider"></div>
         <div class="post-card-actions">
           ${canEdit ? `<button class="btn btn-ghost btn-sm" onclick="openEditModal(${post._row})" title="עריכה">&#9998; עריכה</button>` : ''}
@@ -423,11 +475,13 @@ function updateStats() {
   const total = posts.length;
   const ready = posts.filter(p => (p.status || '').toUpperCase() === 'READY').length;
   const posted = posts.filter(p => (p.status || '').toUpperCase() === 'POSTED').length;
+  const partial = posts.filter(p => (p.status || '').toUpperCase() === 'PARTIAL').length;
   const error = posts.filter(p => (p.status || '').toUpperCase() === 'ERROR').length;
 
   document.getElementById('stat-total').textContent = total;
   document.getElementById('stat-ready').textContent = ready;
   document.getElementById('stat-posted').textContent = posted;
+  document.getElementById('stat-partial').textContent = partial;
   document.getElementById('stat-error').textContent = error;
 }
 
@@ -661,7 +715,14 @@ async function confirmDelete() {
 function showError(rowNumber) {
   const post = posts.find(p => p._row === rowNumber);
   if (!post) return;
-  alert(`שגיאה בפוסט #${post.id}:\n\n${post.error || 'אין פרטי שגיאה'}`);
+
+  const friendly = friendlyError(post.error);
+  const detail = post.error || 'אין פרטי שגיאה';
+  const text = friendly !== detail
+    ? `${friendly}\n\n── פרטים טכניים ──\n${detail}`
+    : detail;
+
+  openCaptionModal(`שגיאה בפוסט #${post.id}`, text);
 }
 
 // ─── Caption Preview Modal ───────────────────────────────────
@@ -1138,6 +1199,7 @@ function showToast(message, type = 'info') {
 // ─── Formatters ──────────────────────────────────────────────
 function statusBadge(status) {
   const map = {
+    'DRAFT': { class: 'badge-draft', label: 'טיוטה' },
     'READY': { class: 'badge-ready', label: 'ממתין' },
     'PROCESSING': { class: 'badge-in-progress', label: 'בתהליך' },
     'POSTED': { class: 'badge-posted', label: 'פורסם' },
@@ -1152,7 +1214,12 @@ function networkLabel(network) {
   const map = {
     'IG': 'IG',
     'FB': 'FB',
+    'GBP': 'GBP',
     'IG+FB': 'IG+FB',
+    'IG+GBP': 'IG+GBP',
+    'FB+GBP': 'FB+GBP',
+    'IG+FB+GBP': 'IG+FB+GBP',
+    'ALL': 'הכל',
   };
   return map[network] || escapeHtml(network) || '-';
 }
@@ -1161,8 +1228,95 @@ function postTypeLabel(type) {
   const map = {
     'FEED': 'פיד',
     'REELS': 'ריל',
+    'STANDARD': 'עדכון',
   };
   return map[type] || escapeHtml(type) || '-';
+}
+
+// ─── Per-channel Results Display ─────────────────────────────
+function channelResultsHtml(post) {
+  const status = (post.status || '').toUpperCase();
+  if (!status || status === 'DRAFT' || status === 'READY' || status === 'PROCESSING') return '';
+
+  const published = (post.published_channels || '').split(',').map(s => s.trim()).filter(Boolean);
+  const failed = (post.failed_channels || '').split(',').map(s => s.trim()).filter(Boolean);
+
+  if (!published.length && !failed.length) {
+    // Legacy post without per-channel data — show overall status
+    if (status === 'POSTED') return '<span class="channel-badge channel-ok">&#10003;</span>';
+    if (status === 'ERROR') return '<span class="channel-badge channel-err">&#10007;</span>';
+    return '';
+  }
+
+  let html = '<div class="channel-results">';
+  for (const ch of published) {
+    html += `<span class="channel-badge channel-ok" title="${escapeHtml(ch)} — הצליח">${escapeHtml(ch)} &#10003;</span>`;
+  }
+  for (const ch of failed) {
+    html += `<span class="channel-badge channel-err" title="${escapeHtml(ch)} — נכשל">${escapeHtml(ch)} &#10007;</span>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+// ─── Friendly Error Messages ─────────────────────────────────
+const ERROR_CODE_LABELS = {
+  'timeout': 'תקלת חיבור (timeout)',
+  'rate_limit': 'חריגת מכסה — נסו שוב מאוחר יותר',
+  'quota_exceeded': 'חריגת מכסה — נסו שוב מאוחר יותר',
+  'http_429': 'חריגת מכסה — נסו שוב מאוחר יותר',
+  'http_500': 'שגיאת שרת בפלטפורמה',
+  'http_502': 'שגיאת שרת בפלטפורמה',
+  'http_503': 'שגיאת שרת בפלטפורמה — נסו שוב',
+  'http_504': 'תקלת חיבור לפלטפורמה',
+  'invalid_caption': 'בעיה בטקסט הפוסט',
+  'missing_location_id': 'חסר מיקום Google Business',
+  'insufficient_permissions': 'אין הרשאות מתאימות',
+  'unhandled_exception': 'שגיאה לא צפויה',
+  'unexpected_error': 'שגיאה לא צפויה',
+  'api_error': 'שגיאת API',
+};
+
+function friendlyError(errorStr) {
+  if (!errorStr) return 'שגיאה לא ידועה';
+  // Try to match known error codes from the result string
+  for (const [code, label] of Object.entries(ERROR_CODE_LABELS)) {
+    if (errorStr.includes(code)) return label;
+  }
+  // Truncate long errors for display
+  return errorStr.length > 120 ? errorStr.substring(0, 117) + '...' : errorStr;
+}
+
+// ─── Retry Functions ─────────────────────────────────────────
+async function retryChannel(rowNumber, channel) {
+  if (!confirm(`לנסות שוב את ${channel}?`)) return;
+  await _doRetry(rowNumber, [channel]);
+}
+
+async function retryAllFailed(rowNumber) {
+  await _doRetry(rowNumber, null);
+}
+
+async function _doRetry(rowNumber, channels) {
+  try {
+    const body = channels ? { channels } : {};
+    const resp = await fetch(`/api/posts/${rowNumber}/retry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const result = await resp.json();
+    if (result.error) {
+      showToast(result.error, 'error');
+      return;
+    }
+    const retried = (result.retry_channels || []).join(', ');
+    showToast(`Retry הופעל עבור ${retried}`, 'success');
+    await loadPosts();
+  } catch (e) {
+    showToast('שגיאה בהפעלת retry', 'error');
+    console.error(e);
+  }
 }
 
 /**

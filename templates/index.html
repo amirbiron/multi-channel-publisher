@@ -67,6 +67,10 @@
             <span class="stat-label">פורסמו</span>
           </div>
           <div class="stat-card">
+            <span class="stat-value" id="stat-partial" style="color: var(--color-warning)">0</span>
+            <span class="stat-label">חלקי</span>
+          </div>
+          <div class="stat-card">
             <span class="stat-value" id="stat-error" style="color: var(--color-error)">0</span>
             <span class="stat-label">שגיאות</span>
           </div>
@@ -99,10 +103,13 @@
               <label class="filter-label">סטטוס</label>
               <select class="filter-select" id="filter-status" onchange="applyFilters()">
                 <option value="">הכל</option>
+                <option value="DRAFT">טיוטה</option>
                 <option value="READY">ממתין</option>
-                <option value="IN_PROGRESS">בתהליך</option>
+                <option value="PROCESSING">בתהליך</option>
                 <option value="POSTED">פורסם</option>
+                <option value="PARTIAL">חלקי</option>
                 <option value="ERROR">שגיאה</option>
+                <option value="_FAILURES">שגיאות בלבד</option>
               </select>
             </div>
             <div class="filter-group">
@@ -111,7 +118,11 @@
                 <option value="">הכל</option>
                 <option value="IG">אינסטגרם</option>
                 <option value="FB">פייסבוק</option>
+                <option value="GBP">Google Business</option>
                 <option value="IG+FB">IG+FB</option>
+                <option value="IG+GBP">IG+GBP</option>
+                <option value="FB+GBP">FB+GBP</option>
+                <option value="IG+FB+GBP">IG+FB+GBP</option>
               </select>
             </div>
             <div class="filter-group">
@@ -154,6 +165,7 @@
                 <th class="th-file" onclick="toggleFileIds()" style="cursor:pointer; user-select:none" title="הצג/הסתר מזהי קבצים">
                   קובץ <span id="file-id-toggle-arrow" style="font-size:10px">&#9664;</span>
                 </th>
+                <th>תוצאות</th>
                 <th>פעולות</th>
               </tr>
             </thead>

@@ -527,6 +527,81 @@ body {
   color: var(--color-error);
 }
 
+.badge-draft {
+  background: var(--color-secondary);
+  color: var(--color-text-muted);
+}
+
+/* ─── Per-channel Results ──────────────────────────────────── */
+.channel-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.channel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.channel-ok {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.channel-err {
+  background: var(--color-error-soft);
+  color: var(--color-error);
+}
+
+.cell-results {
+  min-width: 120px;
+}
+
+/* ─── Retry Buttons ─────────────────────────────────────────── */
+.retry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.btn-retry {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  border: 1px solid oklch(0.75 0.15 85 / 0.3);
+  border-radius: 6px;
+  font-size: var(--font-size-xs);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-retry:hover {
+  background: oklch(0.75 0.15 85 / 0.25);
+}
+
+.btn-retry-all {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border: 1px solid oklch(0.637 0.237 275 / 0.3);
+  border-radius: 6px;
+  font-size: var(--font-size-xs);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-retry-all:hover {
+  background: oklch(0.637 0.237 275 / 0.2);
+}
+
 .badge-dot {
   width: 6px;
   height: 6px;

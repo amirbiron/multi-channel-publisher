@@ -245,6 +245,8 @@ def process_row(
         for cid in skipped_channels:
             logger.info(f"Row {row_id}: {cid} channel not yet implemented — skipping")
 
+        event_logger.log_job_start(targets)
+
         # ── שלב 2: הורדה מ-Drive + נרמול + העלאה לכל קובץ ──
         drive_file_ids = post_data_norm.get("_drive_file_ids", [])
         post_type = post_data_norm.get("post_type", POST_TYPE_FEED)
@@ -297,7 +299,6 @@ def process_row(
         }
 
         publish_results: dict[str, PublishResult] = {}
-        event_logger.log_job_start(targets)
         for cid in targets:
             channel = _registry.get(cid)
             location_id = post_data.get(COL_GOOGLE_LOCATION_ID, "") if cid == "GBP" else ""

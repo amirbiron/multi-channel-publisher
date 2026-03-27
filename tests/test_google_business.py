@@ -15,10 +15,6 @@ import requests
 
 from channels.google_business import GoogleBusinessChannel
 
-# Patch targets — these are imported lazily inside publish()
-_PATCH_AUTH = "channels.google_auth.get_oauth_manager"
-_PATCH_POST = "channels.google_business.requests.post"
-
 
 @pytest.fixture
 def channel():

@@ -1496,6 +1496,7 @@ async function retryChannel(rowNumber, channel) {
 }
 
 async function retryAllFailed(rowNumber) {
+  if (!confirm('לנסות שוב את כל הערוצים שנכשלו?')) return;
   await _doRetry(rowNumber, null);
 }
 

@@ -553,6 +553,8 @@ def api_retry_post(row_number):
             updates = {
                 COL_STATUS: STATUS_READY,
                 COL_ERROR: "",
+                COL_FAILED_CHANNELS: "",
+                COL_PUBLISHED_CHANNELS: "",
                 COL_LOCKED_AT: "",
                 COL_PROCESSING_BY: "",
                 COL_RETRY_COUNT: "0",

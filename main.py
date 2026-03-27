@@ -19,7 +19,6 @@ from dateutil import parser as dtparser
 from config import (
     TZ_IL,
     COL_STATUS,
-    COL_NETWORK,
     COL_POST_TYPE,
     COL_PUBLISH_AT,
     COL_CAPTION,
@@ -30,7 +29,6 @@ from config import (
     COL_CTA_TYPE,
     COL_CTA_URL,
     COL_GOOGLE_LOCATION_ID,
-    COL_DRIVE_FILE_ID,
     COL_CLOUDINARY_URL,
     COL_RESULT,
     COL_ERROR,
@@ -41,17 +39,7 @@ from config import (
     STATUS_POSTED,
     STATUS_PARTIAL,
     STATUS_ERROR,
-    NETWORK_IG,
-    NETWORK_FB,
-    NETWORK_GBP,
-    NETWORK_BOTH,
-    NETWORK_IG_GBP,
-    NETWORK_FB_GBP,
-    NETWORK_ALL_THREE,
-    NETWORK_ALL,
-    VALID_NETWORKS,
     POST_TYPE_FEED,
-    POST_TYPE_REELS,
     PUBLISH_MAX_RETRIES,
     PUBLISH_RETRY_DELAY,
     COL_LOCKED_AT,
@@ -69,6 +57,7 @@ from cloud_storage import upload_to_cloudinary, delete_from_cloudinary
 from media_processor import normalize_media, MediaProcessingError
 from channels import create_default_registry, PublishResult
 from notifications import notify_publish_error, notify_partial_success
+from validator import RowValidator, ValidationReport, format_validation_error, format_blocked_channels_error
 
 # ─── Logging ─────────────────────────────────────────────────
 logging.basicConfig(
@@ -81,6 +70,9 @@ logger = logging.getLogger("social-publisher")
 
 # ─── Channel Registry (singleton for the run) ────────────────
 _registry = create_default_registry()
+
+# ─── Validator (singleton for the run) ────────────────────────
+_validator = RowValidator(registered_channel_ids=_registry.channel_ids)
 
 # Unique run identifier — used for processing_by lock field
 _RUN_ID = f"run_{uuid.uuid4().hex[:12]}"
@@ -123,31 +115,9 @@ def get_cell(row: list[str], header: list[str], col_name: str, default: str = ""
         return default
 
 
-# Map network value → list of channel IDs it includes
-_NETWORK_TO_CHANNELS = {
-    NETWORK_IG: [NETWORK_IG],
-    NETWORK_FB: [NETWORK_FB],
-    NETWORK_GBP: [NETWORK_GBP],
-    NETWORK_BOTH: [NETWORK_IG, NETWORK_FB],
-    NETWORK_IG_GBP: [NETWORK_IG, NETWORK_GBP],
-    NETWORK_FB_GBP: [NETWORK_FB, NETWORK_GBP],
-    NETWORK_ALL_THREE: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
-    NETWORK_ALL: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
-}
-
-
-def _resolve_targets(network: str) -> list[str]:
-    """Resolve network to publishable channel IDs (only registered ones)."""
-    requested = _NETWORK_TO_CHANNELS.get(network, [])
-    registered_ids = set(_registry.channel_ids)
-    return [cid for cid in requested if cid in registered_ids]
-
-
-def _unregistered_channels(network: str) -> list[str]:
-    """Return channel IDs requested by network but not yet registered."""
-    requested = _NETWORK_TO_CHANNELS.get(network, [])
-    registered_ids = set(_registry.channel_ids)
-    return [cid for cid in requested if cid not in registered_ids]
+def _row_to_dict(row: list[str], header: list[str]) -> dict[str, str]:
+    """Convert a sheet row + header into a dict for the validator."""
+    return {col: get_cell(row, header, col) for col in header}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -206,7 +176,7 @@ def process_row(
     sheet_row_number: int,
 ) -> bool:
     """
-    מעבד שורה אחת: מאמת נעילה → מוריד → מעלה → מפרסם → מעדכן.
+    מעבד שורה אחת: מאמת נעילה → validates → מוריד → מעלה → מפרסם → מעדכן.
     תומך ב-network מרובה לפרסום לכמה ערוצים מאותה שורה.
     מחזיר True אם השורה עובדה בפועל, False אם דולגה.
     """
@@ -225,56 +195,38 @@ def process_row(
             )
             return False
 
-        network = get_cell(row, header, COL_NETWORK).strip().upper()
-        post_type = get_cell(row, header, COL_POST_TYPE).strip().upper() or POST_TYPE_FEED
-        drive_file_id = get_cell(row, header, COL_DRIVE_FILE_ID).strip()
-        caption_generic = get_cell(row, header, COL_CAPTION)
-        caption_ig = get_cell(row, header, COL_CAPTION_IG) or caption_generic
-        caption_fb = get_cell(row, header, COL_CAPTION_FB) or caption_generic
-        caption_gbp = get_cell(row, header, COL_CAPTION_GBP)
-        google_location_id = get_cell(row, header, COL_GOOGLE_LOCATION_ID).strip()
-        gbp_post_type = get_cell(row, header, COL_GBP_POST_TYPE).strip()
-        cta_type = get_cell(row, header, COL_CTA_TYPE).strip()
-        cta_url = get_cell(row, header, COL_CTA_URL).strip()
+        # ── שלב 1: Validation — before any I/O ──
+        row_data = _row_to_dict(row, header)
+        report = _validator.validate(row_data)
 
-        if not drive_file_id:
-            _mark_error(header, sheet_row_number, "Missing drive_file_id")
+        # Log warnings
+        for w in report.warnings:
+            logger.info(f"Row {row_id}: [WARN] {w.code}: {w.message}")
+
+        if report.row_blocked:
+            error_msg = format_validation_error(report)
+            logger.warning(f"Row {row_id}: Validation blocked — {error_msg}")
+            _mark_error(header, sheet_row_number, error_msg)
             return True
 
-        if network not in VALID_NETWORKS:
-            _mark_error(header, sheet_row_number, f"Unknown network: {network}")
-            return True
+        # Log channel-level blocks
+        for cid, issues in report.blocked_channels.items():
+            for issue in issues:
+                logger.warning(f"Row {row_id}: {cid} blocked — [{issue.code}] {issue.message}")
 
-        # ── בדיקת ערוצי יעד לפני I/O — מונע העלאות מיותרות ──
-        targets = _resolve_targets(network)
-        skipped_channels = _unregistered_channels(network)
+        targets = report.approved_channels
+        skipped_channels = report.skipped_channels
+        validation_blocked_channels = list(report.blocked_channels.keys())
+        post_data_norm = report.normalized_post_data
+
         for cid in skipped_channels:
             logger.info(f"Row {row_id}: {cid} channel not yet implemented — skipping")
 
-        if not targets:
-            # All requested channels are unregistered (e.g. GBP-only)
-            _mark_error(
-                header, sheet_row_number,
-                f"{', '.join(skipped_channels)} channel not yet implemented",
-            )
-            return True
-
-        # ── פירוק drive_file_id — תמיכה בקבצים מרובים (קרוסלה) ──
-        drive_file_ids = [fid.strip() for fid in drive_file_id.split(",") if fid.strip()]
-        if not drive_file_ids:
-            _mark_error(header, sheet_row_number, "Missing drive_file_id")
-            return True
+        # ── שלב 2: הורדה מ-Drive + נרמול + העלאה לכל קובץ ──
+        drive_file_ids = post_data_norm.get("_drive_file_ids", [])
+        post_type = post_data_norm.get("post_type", POST_TYPE_FEED)
         is_carousel = len(drive_file_ids) > 1
 
-        if is_carousel and post_type == POST_TYPE_REELS:
-            _mark_error(header, sheet_row_number, "Carousel not supported for REELS — use FEED")
-            return True
-
-        if is_carousel and len(drive_file_ids) > 10:
-            _mark_error(header, sheet_row_number, f"Carousel supports 2-10 items, got {len(drive_file_ids)}")
-            return True
-
-        # ── שלב 2: הורדה מ-Drive + נרמול + העלאה לכל קובץ ──
         cloud_urls = []
         mime_types = []
 
@@ -305,17 +257,17 @@ def process_row(
         # שמירת כל ה-URLs לטבלה (מופרדים בפסיק)
         cloud_urls_str = ",".join(cloud_urls)
 
-        # ── שלב 4: פרסום דרך ה-registry ──
-        # Build post_data dict that channels understand
+        # ── שלב 3: פרסום דרך ה-registry ──
+        # Build post_data dict that channels understand (add cloud_urls from upload)
         post_data = {
-            "caption": caption_generic,
-            COL_CAPTION_IG: caption_ig,
-            COL_CAPTION_FB: caption_fb,
-            COL_CAPTION_GBP: caption_gbp,
-            COL_GOOGLE_LOCATION_ID: google_location_id,
-            COL_GBP_POST_TYPE: gbp_post_type,
-            COL_CTA_TYPE: cta_type,
-            COL_CTA_URL: cta_url,
+            "caption": post_data_norm.get("caption", ""),
+            COL_CAPTION_IG: post_data_norm.get(COL_CAPTION_IG, ""),
+            COL_CAPTION_FB: post_data_norm.get(COL_CAPTION_FB, ""),
+            COL_CAPTION_GBP: post_data_norm.get(COL_CAPTION_GBP, ""),
+            COL_GOOGLE_LOCATION_ID: post_data_norm.get(COL_GOOGLE_LOCATION_ID, ""),
+            COL_GBP_POST_TYPE: post_data_norm.get(COL_GBP_POST_TYPE, ""),
+            COL_CTA_TYPE: post_data_norm.get(COL_CTA_TYPE, ""),
+            COL_CTA_URL: post_data_norm.get(COL_CTA_URL, ""),
             "cloud_urls": cloud_urls,
             "mime_types": mime_types,
             "post_type": post_type,
@@ -339,9 +291,12 @@ def process_row(
                     error_message=str(exc)[:500],
                 )
 
-        # ── שלב 5: סימון תוצאה ──
+        # ── שלב 4: סימון תוצאה ──
         succeeded = {cid: r for cid, r in publish_results.items() if r.success}
         failed = {cid: r for cid, r in publish_results.items() if not r.success}
+
+        # Combine publish failures with validation-blocked channels
+        all_failed_channels = list(failed.keys()) + validation_blocked_channels
 
         if failed and not succeeded:
             # כל הערוצים נכשלו — build detailed error and raise
@@ -351,25 +306,36 @@ def process_row(
                 if r.raw_response:
                     detail += f" | API response: {r.raw_response}"
                 error_parts.append(detail)
+            if validation_blocked_channels:
+                blocked_err = format_blocked_channels_error(report)
+                if blocked_err:
+                    error_parts.append(f"Validation blocked: {blocked_err}")
             raise RuntimeError("; ".join(error_parts))
 
         # בניית מחרוזת תוצאה — פורמט: CHANNEL:STATUS:detail
-        is_multi = len(targets) > 1
+        is_multi = len(targets) > 1 or validation_blocked_channels
         result_parts = []
         for cid, r in succeeded.items():
             result_parts.append(f"{cid}:POSTED:{r.platform_post_id}")
         for cid, r in failed.items():
             result_parts.append(f"{cid}:ERROR:{r.error_code}")
+        for cid in validation_blocked_channels:
+            result_parts.append(f"{cid}:BLOCKED:validation")
         result_str = (
             " | ".join(result_parts) if is_multi
             else str(list(succeeded.values())[0].platform_post_id)
         )
 
-        if failed:
-            # הצלחה חלקית בערוצים שפורסמו
-            error_parts = [
-                f"{cid}: [{r.error_code}] {r.error_message}" for cid, r in failed.items()
-            ]
+        if failed or validation_blocked_channels:
+            # הצלחה חלקית — ערוצים שנכשלו בפרסום או נחסמו בולידציה
+            error_parts = []
+            for cid, r in failed.items():
+                error_parts.append(f"{cid}: [{r.error_code}] {r.error_message}")
+            for cid in validation_blocked_channels:
+                ch_issues = report.blocked_channels.get(cid, [])
+                for issue in ch_issues:
+                    if issue.severity == "CHANNEL_BLOCK":
+                        error_parts.append(f"{cid}: [{issue.code}] {issue.message}")
             error_detail = f"Partial success. Failures: {'; '.join(error_parts)}"
             logger.warning(f"Row {row_id}: PARTIAL — {error_detail}")
             notify_partial_success(row_id, result_str, "; ".join(error_parts))
@@ -381,7 +347,7 @@ def process_row(
                     COL_RESULT: result_str,
                     COL_ERROR: error_detail[:500],
                     COL_PUBLISHED_CHANNELS: ",".join(succeeded.keys()),
-                    COL_FAILED_CHANNELS: ",".join(failed.keys()),
+                    COL_FAILED_CHANNELS: ",".join(all_failed_channels),
                     COL_LOCKED_AT: "",
                     COL_PROCESSING_BY: "",
                 },
@@ -663,16 +629,24 @@ def process_partial_row(
         return False
 
     try:
-        network = get_cell(row, header, COL_NETWORK).strip().upper()
-        post_type = get_cell(row, header, COL_POST_TYPE).strip().upper() or POST_TYPE_FEED
-        caption_generic = get_cell(row, header, COL_CAPTION)
-        caption_ig = get_cell(row, header, COL_CAPTION_IG) or caption_generic
-        caption_fb = get_cell(row, header, COL_CAPTION_FB) or caption_generic
-        caption_gbp = get_cell(row, header, COL_CAPTION_GBP)
-        google_location_id = get_cell(row, header, COL_GOOGLE_LOCATION_ID).strip()
-        gbp_post_type = get_cell(row, header, COL_GBP_POST_TYPE).strip()
-        cta_type = get_cell(row, header, COL_CTA_TYPE).strip()
-        cta_url = get_cell(row, header, COL_CTA_URL).strip()
+        # ── Validate retry targets using the validator ──
+        # Use original row but override status to PROCESSING (we just locked it)
+        # to avoid the validator blocking on PARTIAL status.
+        row_data = _row_to_dict(row, header)
+        row_data[COL_STATUS] = STATUS_PROCESSING
+        report = _validator.validate(row_data)
+
+        # If the entire row is blocked, mark as error and bail out
+        if report.row_blocked:
+            error_msg = format_validation_error(report)
+            logger.warning(f"Row {row_id}: Validation blocked on retry — {error_msg}")
+            _mark_error(header, sheet_row_number, f"Partial retry failed: {error_msg}")
+            return True
+
+        post_data_norm = report.normalized_post_data
+
+        post_type = post_data_norm.get("post_type", POST_TYPE_FEED)
+        caption_generic = post_data_norm.get("caption", "")
         cloud_urls_str = get_cell(row, header, COL_CLOUDINARY_URL).strip()
         cloud_urls = [u.strip() for u in cloud_urls_str.split(",") if u.strip()]
 
@@ -686,17 +660,38 @@ def process_partial_row(
 
         post_data = {
             "caption": caption_generic,
-            COL_CAPTION_IG: caption_ig,
-            COL_CAPTION_FB: caption_fb,
-            COL_CAPTION_GBP: caption_gbp,
-            COL_GOOGLE_LOCATION_ID: google_location_id,
-            COL_GBP_POST_TYPE: gbp_post_type,
-            COL_CTA_TYPE: cta_type,
-            COL_CTA_URL: cta_url,
+            COL_CAPTION_IG: post_data_norm.get(COL_CAPTION_IG, ""),
+            COL_CAPTION_FB: post_data_norm.get(COL_CAPTION_FB, ""),
+            COL_CAPTION_GBP: post_data_norm.get(COL_CAPTION_GBP, ""),
+            COL_GOOGLE_LOCATION_ID: post_data_norm.get(COL_GOOGLE_LOCATION_ID, ""),
+            COL_GBP_POST_TYPE: post_data_norm.get(COL_GBP_POST_TYPE, ""),
+            COL_CTA_TYPE: post_data_norm.get(COL_CTA_TYPE, ""),
+            COL_CTA_URL: post_data_norm.get(COL_CTA_URL, ""),
             "cloud_urls": cloud_urls,
             "mime_types": mime_types,
             "post_type": post_type,
         }
+
+        # Filter retry targets: only allow channels that passed validation.
+        # This catches both explicitly-blocked and unvalidated channels
+        # (e.g., channel removed from network field after initial publish).
+        validation_blocked_retry = []
+        approved_set = set(report.approved_channels)
+        for cid in list(retry_targets):
+            if cid not in approved_set:
+                validation_blocked_retry.append(cid)
+                retry_targets.remove(cid)
+                issues = report.blocked_channels.get(cid, [])
+                if issues:
+                    for issue in issues:
+                        logger.warning(
+                            f"Row {row_id}: {cid} still blocked on retry — "
+                            f"[{issue.code}] {issue.message}"
+                        )
+                else:
+                    logger.warning(
+                        f"Row {row_id}: {cid} not in validated channels — skipping retry"
+                    )
 
         # Publish only to failed channels
         new_results: dict[str, PublishResult] = {}
@@ -723,12 +718,14 @@ def process_partial_row(
         # Merge results
         newly_succeeded = {cid for cid, r in new_results.items() if r.success}
         still_failed = {cid for cid, r in new_results.items() if not r.success}
+        # Include validation-blocked channels as still-failed
+        still_failed |= set(validation_blocked_retry)
         all_published = already_published | newly_succeeded
 
         # Build updated result string — same CHANNEL:STATUS:detail format as process_row
         # Remove stale entries for retried channels before appending new results
         existing_result = get_cell(row, header, COL_RESULT).strip()
-        retried_cids = set(new_results.keys())
+        retried_cids = set(new_results.keys()) | set(validation_blocked_retry)
         if existing_result:
             kept_parts = [
                 part.strip() for part in existing_result.split("|")
@@ -743,13 +740,24 @@ def process_partial_row(
                 new_result_parts.append(f"{cid}:POSTED:{r.platform_post_id}")
             else:
                 new_result_parts.append(f"{cid}:ERROR:{r.error_code}")
+        for cid in validation_blocked_retry:
+            new_result_parts.append(f"{cid}:BLOCKED:validation")
 
         result_str = " | ".join(kept_parts + new_result_parts)
 
         if still_failed:
-            error_parts = [
-                f"{cid}: [{new_results[cid].error_code}] {new_results[cid].error_message}" for cid in still_failed
-            ]
+            error_parts = []
+            for cid in still_failed:
+                if cid in new_results:
+                    r = new_results[cid]
+                    error_parts.append(f"{cid}: [{r.error_code}] {r.error_message}")
+                elif cid in validation_blocked_retry and not report.row_blocked:
+                    ch_issues = report.blocked_channels.get(cid, [])
+                    for issue in ch_issues:
+                        if issue.severity == "CHANNEL_BLOCK":
+                            error_parts.append(f"{cid}: [{issue.code}] {issue.message}")
+                else:
+                    error_parts.append(f"{cid}: validation blocked")
             sheets_update_cells(
                 sheet_row_number,
                 {

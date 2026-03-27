@@ -62,6 +62,7 @@ from config_constants import (
     POST_TYPE_FEED,
     POST_TYPE_REELS,
     GBP_POST_TYPE_STANDARD,
+    SHEET_COLUMNS,
 )
 from google_api import (
     sheets_read_all_rows,
@@ -246,11 +247,8 @@ def _login_page() -> str:
 # Drive folder ID (root folder for media files)
 DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "")
 
-# Expected column order in the sheet
-SHEET_COLUMNS = [
-    COL_ID, COL_STATUS, COL_NETWORK, COL_POST_TYPE,
-    COL_PUBLISH_AT, COL_CAPTION_IG, COL_CAPTION_FB,
-    COL_DRIVE_FILE_ID, COL_CLOUDINARY_URL, COL_RESULT, COL_ERROR,
+
+
 ]
 
 
@@ -911,8 +909,8 @@ def api_config():
     return jsonify({
         "driveFolderId": DRIVE_FOLDER_ID,
         "columns": SHEET_COLUMNS,
-        "statuses": [STATUS_READY, STATUS_IN_PROGRESS, STATUS_POSTED, STATUS_ERROR],
-        "networks": [NETWORK_IG, NETWORK_FB, NETWORK_BOTH],
+        "statuses": [STATUS_DRAFT, STATUS_READY, STATUS_IN_PROGRESS, STATUS_POSTED, STATUS_PARTIAL, STATUS_ERROR],
+        "networks": sorted(VALID_NETWORKS),
         "postTypes": [POST_TYPE_FEED, POST_TYPE_REELS],
         "isDev": bool(is_dev),
     })

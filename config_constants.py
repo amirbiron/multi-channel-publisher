@@ -82,15 +82,6 @@ CTA_LEARN_MORE = "LEARN_MORE"
 CTA_CALL = "CALL"
 CTA_BOOK = "BOOK"
 
-# ─── Caption Resolution ────────────────────────────────────
-# Fallback order: caption_{channel} → caption (generic) → empty
-# Used by the channel layer to resolve the right caption per channel.
-CAPTION_COLUMNS_BY_CHANNEL = {
-    "IG": COL_CAPTION_IG,
-    "FB": COL_CAPTION_FB,
-    "GBP": COL_CAPTION_GBP,
-}
-
 # ─── Sheet Schema ───────────────────────────────────────────
 # Canonical column order for the Google Sheet.
 # Existing IG/FB rows continue to work — new columns are optional

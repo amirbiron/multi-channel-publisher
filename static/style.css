@@ -490,6 +490,67 @@ body {
   color: var(--color-text-muted);
 }
 
+.form-hint {
+  font-weight: 400;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.form-required {
+  color: var(--color-error);
+}
+
+/* ─── Channel Checkboxes ─────────────────────────────────────── */
+.channel-checkboxes {
+  display: flex;
+  gap: var(--space-md);
+  align-items: center;
+  padding: 6px 0;
+}
+
+.channel-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  cursor: pointer;
+  user-select: none;
+}
+
+.channel-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.channel-checkbox-label {
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+/* ─── GBP Fields Section ─────────────────────────────────────── */
+.gbp-fields-section {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-md);
+  margin-top: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.form-section-divider {
+  margin-bottom: var(--space-xs);
+}
+
+.form-section-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 /* ─── Status Badges ─────────────────────────────────────────── */
 .badge {
   display: inline-flex;

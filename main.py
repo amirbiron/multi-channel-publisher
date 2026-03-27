@@ -30,7 +30,6 @@ from config import (
     COL_CTA_TYPE,
     COL_CTA_URL,
     COL_GOOGLE_LOCATION_ID,
-    COL_DRIVE_FILE_ID,
     COL_CLOUDINARY_URL,
     COL_RESULT,
     COL_ERROR,
@@ -41,17 +40,7 @@ from config import (
     STATUS_POSTED,
     STATUS_PARTIAL,
     STATUS_ERROR,
-    NETWORK_IG,
-    NETWORK_FB,
-    NETWORK_GBP,
-    NETWORK_BOTH,
-    NETWORK_IG_GBP,
-    NETWORK_FB_GBP,
-    NETWORK_ALL_THREE,
-    NETWORK_ALL,
-    VALID_NETWORKS,
     POST_TYPE_FEED,
-    POST_TYPE_REELS,
     PUBLISH_MAX_RETRIES,
     PUBLISH_RETRY_DELAY,
     COL_LOCKED_AT,
@@ -125,33 +114,6 @@ def get_cell(row: list[str], header: list[str], col_name: str, default: str = ""
         return row[idx] if idx < len(row) else default
     except (ValueError, IndexError):
         return default
-
-
-# Map network value → list of channel IDs it includes
-_NETWORK_TO_CHANNELS = {
-    NETWORK_IG: [NETWORK_IG],
-    NETWORK_FB: [NETWORK_FB],
-    NETWORK_GBP: [NETWORK_GBP],
-    NETWORK_BOTH: [NETWORK_IG, NETWORK_FB],
-    NETWORK_IG_GBP: [NETWORK_IG, NETWORK_GBP],
-    NETWORK_FB_GBP: [NETWORK_FB, NETWORK_GBP],
-    NETWORK_ALL_THREE: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
-    NETWORK_ALL: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
-}
-
-
-def _resolve_targets(network: str) -> list[str]:
-    """Resolve network to publishable channel IDs (only registered ones)."""
-    requested = _NETWORK_TO_CHANNELS.get(network, [])
-    registered_ids = set(_registry.channel_ids)
-    return [cid for cid in requested if cid in registered_ids]
-
-
-def _unregistered_channels(network: str) -> list[str]:
-    """Return channel IDs requested by network but not yet registered."""
-    requested = _NETWORK_TO_CHANNELS.get(network, [])
-    registered_ids = set(_registry.channel_ids)
-    return [cid for cid in requested if cid not in registered_ids]
 
 
 def _row_to_dict(row: list[str], header: list[str]) -> dict[str, str]:
@@ -669,7 +631,10 @@ def process_partial_row(
 
     try:
         # ── Validate retry targets using the validator ──
+        # Use original row but override status to PROCESSING (we just locked it)
+        # to avoid the validator blocking on PARTIAL status.
         row_data = _row_to_dict(row, header)
+        row_data[COL_STATUS] = STATUS_PROCESSING
         report = _validator.validate(row_data)
         post_data_norm = report.normalized_post_data
 
@@ -769,9 +734,18 @@ def process_partial_row(
         result_str = " | ".join(kept_parts + new_result_parts)
 
         if still_failed:
-            error_parts = [
-                f"{cid}: [{new_results[cid].error_code}] {new_results[cid].error_message}" for cid in still_failed
-            ]
+            error_parts = []
+            for cid in still_failed:
+                if cid in new_results:
+                    r = new_results[cid]
+                    error_parts.append(f"{cid}: [{r.error_code}] {r.error_message}")
+                elif cid in validation_blocked_retry and not report.row_blocked:
+                    ch_issues = report.blocked_channels.get(cid, [])
+                    for issue in ch_issues:
+                        if issue.severity == "CHANNEL_BLOCK":
+                            error_parts.append(f"{cid}: [{issue.code}] {issue.message}")
+                else:
+                    error_parts.append(f"{cid}: validation blocked")
             sheets_update_cells(
                 sheet_row_number,
                 {

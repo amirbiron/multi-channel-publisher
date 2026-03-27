@@ -481,11 +481,8 @@ function onChannelChange() {
   const postTypeSelect = document.getElementById('form-post-type');
   const currentValue = postTypeSelect.value;
 
-  // Post type: Reels only if IG is selected (not FB-only)
-  const fbOnly = hasFB && !hasIG && !hasGBP;
-  const hasIGSelected = hasIG;
-
-  if (!hasIGSelected) {
+  // Post type: Reels only available when IG is selected
+  if (!hasIG) {
     postTypeSelect.innerHTML = '<option value="FEED">תמונה / וידאו</option>';
     postTypeSelect.disabled = true;
   } else {
@@ -517,8 +514,13 @@ function toggleManualLocationId() {
   }
 }
 
-async function loadGbpLocations() {
+// Pending location ID to select once the dropdown loads
+let _pendingLocationId = '';
+
+async function loadGbpLocations(selectLocationId = '') {
+  _pendingLocationId = selectLocationId;
   const select = document.getElementById('form-google-location-id');
+  const manual = document.getElementById('form-google-location-id-manual');
   try {
     const resp = await fetch('/api/gbp/locations');
     const data = await resp.json();
@@ -532,6 +534,21 @@ async function loadGbpLocations() {
       opt.textContent = loc.title || loc.name || loc.id;
       select.appendChild(opt);
     });
+
+    // Apply the pending location selection now that options are loaded
+    if (_pendingLocationId) {
+      const optionExists = Array.from(select.options).some(o => o.value === _pendingLocationId);
+      if (optionExists) {
+        select.value = _pendingLocationId;
+        manual.value = '';
+        manual.classList.add('hidden');
+      } else {
+        select.value = '';
+        manual.value = _pendingLocationId;
+        manual.classList.remove('hidden');
+      }
+      _pendingLocationId = '';
+    }
   } catch (e) {
     console.error('Failed to load GBP locations:', e);
   }
@@ -560,25 +577,11 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
   document.getElementById('form-cta-type').value = ctaType;
   document.getElementById('form-cta-url').value = ctaUrl;
 
-  // Set google location: try select first, fall back to manual
-  const locationSelect = document.getElementById('form-google-location-id');
-  const locationManual = document.getElementById('form-google-location-id-manual');
-  if (googleLocationId) {
-    // Check if the value exists in the dropdown
-    const optionExists = Array.from(locationSelect.options).some(o => o.value === googleLocationId);
-    if (optionExists) {
-      locationSelect.value = googleLocationId;
-      locationManual.classList.add('hidden');
-    } else {
-      locationSelect.value = '';
-      locationManual.value = googleLocationId;
-      locationManual.classList.remove('hidden');
-    }
-  } else {
-    locationSelect.value = '';
-    locationManual.value = '';
-    locationManual.classList.add('hidden');
-  }
+  // Location will be set by loadGbpLocations() after fetch completes.
+  // Reset to empty for now — the async loader applies the pending value.
+  document.getElementById('form-google-location-id').value = '';
+  document.getElementById('form-google-location-id-manual').value = '';
+  document.getElementById('form-google-location-id-manual').classList.add('hidden');
 
   document.getElementById('form-drive-file-id').value = driveFileId;
   document.getElementById('form-drive-file-id-manual').value = '';
@@ -607,7 +610,7 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
 
 // ─── Create Post ─────────────────────────────────────────────
 function openCreateModal() {
-  loadGbpLocations();
+  loadGbpLocations('');
   resetPostForm({ title: 'פוסט חדש' });
 }
 
@@ -626,7 +629,7 @@ function openEditModal(rowNumber) {
     }
   }
 
-  loadGbpLocations();
+  loadGbpLocations(post.google_location_id || '');
   resetPostForm({
     title: 'עריכת פוסט',
     rowNumber,
@@ -651,7 +654,7 @@ function duplicatePost(rowNumber) {
   const post = posts.find(p => p._row === rowNumber);
   if (!post) return;
 
-  loadGbpLocations();
+  loadGbpLocations(post.google_location_id || '');
   resetPostForm({
     title: 'שכפול פוסט',
     network: post.network || 'IG+FB',
@@ -1208,7 +1211,7 @@ function calendarToday() {
 }
 
 function openCreateModalWithDate(dateStr) {
-  loadGbpLocations();
+  loadGbpLocations('');
   resetPostForm({ title: 'פוסט חדש', publishAt: `${dateStr}T12:00` });
 }
 

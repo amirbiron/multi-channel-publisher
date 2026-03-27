@@ -560,18 +560,54 @@ function toggleManualLocationId() {
 // Only the latest call applies its result, stale responses are ignored.
 let _locationRequestId = 0;
 
-async function loadGbpLocations(selectLocationId = '') {
+function _setLocationLoading(loading) {
+  const icon = document.getElementById('refresh-locations-icon');
+  const btn = document.getElementById('btn-refresh-locations');
+  if (loading) {
+    icon.classList.add('spinning');
+    btn.disabled = true;
+  } else {
+    icon.classList.remove('spinning');
+    btn.disabled = false;
+  }
+}
+
+function _showLocationWarning(message) {
+  const warning = document.getElementById('location-warning');
+  const text = document.getElementById('location-warning-text');
+  if (message) {
+    text.textContent = message;
+    warning.classList.remove('hidden');
+  } else {
+    warning.classList.add('hidden');
+    text.textContent = '';
+  }
+}
+
+async function loadGbpLocations(selectLocationId = '', forceRefresh = false) {
   const requestId = ++_locationRequestId;
   const select = document.getElementById('form-google-location-id');
   const manual = document.getElementById('form-google-location-id-manual');
+  _setLocationLoading(true);
+  _showLocationWarning('');
   try {
-    const resp = await fetch('/api/gbp/locations');
+    const url = forceRefresh ? '/api/gbp/locations?refresh=1' : '/api/gbp/locations';
+    const resp = await fetch(url);
     const data = await resp.json();
 
     // Stale response — a newer call was made while this one was in flight
     if (requestId !== _locationRequestId) return;
 
     if (data.error || !data.locations) {
+      select.innerHTML = '<option value="">בחר מיקום...</option>';
+      _showLocationWarning('לא ניתן לטעון מיקומים מ-Google. ניתן להזין ידנית.');
+      _applyLocationFallback(select, manual, selectLocationId);
+      return;
+    }
+
+    if (data.locations.length === 0) {
+      select.innerHTML = '<option value="">בחר מיקום...</option>';
+      _showLocationWarning('לא נמצאו מיקומים בחשבון Google Business.');
       _applyLocationFallback(select, manual, selectLocationId);
       return;
     }
@@ -581,7 +617,9 @@ async function loadGbpLocations(selectLocationId = '') {
     data.locations.forEach(loc => {
       const opt = document.createElement('option');
       opt.value = loc.name || loc.id;
-      opt.textContent = loc.title || loc.name || loc.id;
+      const title = loc.title || loc.name || loc.id;
+      const address = loc.address || '';
+      opt.textContent = address ? `${title} — ${address}` : title;
       select.appendChild(opt);
     });
 
@@ -596,14 +634,27 @@ async function loadGbpLocations(selectLocationId = '') {
         select.value = '';
         manual.value = selectLocationId;
         manual.classList.remove('hidden');
+        _showLocationWarning('המיקום שנבחר לא נמצא ברשימת המיקומים הזמינים.');
       }
     }
   } catch (e) {
     console.error('Failed to load GBP locations:', e);
     if (requestId === _locationRequestId) {
+      _showLocationWarning('שגיאה בטעינת מיקומים. ניתן להזין ידנית.');
       _applyLocationFallback(select, manual, selectLocationId);
     }
+  } finally {
+    if (requestId === _locationRequestId) {
+      _setLocationLoading(false);
+    }
   }
+}
+
+function refreshGbpLocations() {
+  const select = document.getElementById('form-google-location-id');
+  const currentValue = select.value ||
+    document.getElementById('form-google-location-id-manual').value.trim();
+  loadGbpLocations(currentValue, true);
 }
 
 function _applyLocationFallback(select, manual, locationId) {

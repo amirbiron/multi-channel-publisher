@@ -602,16 +602,24 @@ def api_delete_post(row_number):
 
 @app.route("/api/gbp/locations", methods=["GET"])
 def api_gbp_locations():
-    """מחזיר רשימת מיקומי GBP זמינים."""
+    """מחזיר רשימת מיקומי GBP זמינים.
+
+    Query params:
+        refresh=1  — bypass cache and fetch fresh data from Google API
+    """
     try:
         from channels.google_locations import get_locations_service
         svc = get_locations_service()
-        locations = svc.list_locations()
+        force_refresh = request.args.get("refresh") == "1"
+        locations = svc.list_locations(force_refresh=force_refresh)
         return jsonify({
             "locations": [
                 {
                     "name": loc.get("name", ""),
                     "title": loc.get("title", ""),
+                    "address": _format_storefront_address(
+                        loc.get("storefrontAddress", {})
+                    ),
                     "id": loc.get("name", ""),
                 }
                 for loc in locations
@@ -624,6 +632,17 @@ def api_gbp_locations():
     except Exception as e:
         logger.error(f"Error fetching GBP locations: {e}", exc_info=True)
         return jsonify({"locations": [], "error": str(e)})
+
+
+def _format_storefront_address(addr: dict) -> str:
+    """Build a short display string from a GBP storefrontAddress dict."""
+    if not addr:
+        return ""
+    parts = [
+        addr.get("addressLines", [""])[0] if addr.get("addressLines") else "",
+        addr.get("locality", ""),
+    ]
+    return ", ".join(p for p in parts if p)
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -283,9 +283,18 @@
 
         <div class="form-group">
           <label class="form-label">מיקום Google <span class="form-required">*</span></label>
-          <select class="form-select" id="form-google-location-id">
-            <option value="">בחר מיקום...</option>
-          </select>
+          <div class="location-select-row">
+            <select class="form-select" id="form-google-location-id">
+              <option value="">בחר מיקום...</option>
+            </select>
+            <button class="btn btn-ghost btn-icon" onclick="refreshGbpLocations()" id="btn-refresh-locations" title="רענון רשימת מיקומים">
+              <span class="refresh-icon" id="refresh-locations-icon">&#8635;</span>
+            </button>
+          </div>
+          <div class="location-warning hidden" id="location-warning">
+            <span class="warning-icon">&#9888;</span>
+            <span class="warning-text" id="location-warning-text"></span>
+          </div>
           <input type="text" class="form-input mt-sm hidden" id="form-google-location-id-manual"
                  placeholder="או הזן Location ID ידנית (למשל locations/123456)">
           <button class="btn btn-ghost btn-sm mt-sm" onclick="toggleManualLocationId()" id="btn-manual-location">הזנה ידנית</button>

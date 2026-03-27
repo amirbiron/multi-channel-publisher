@@ -25,6 +25,11 @@ from config import (
     COL_CAPTION,
     COL_CAPTION_IG,
     COL_CAPTION_FB,
+    COL_CAPTION_GBP,
+    COL_GBP_POST_TYPE,
+    COL_CTA_TYPE,
+    COL_CTA_URL,
+    COL_GOOGLE_LOCATION_ID,
     COL_DRIVE_FILE_ID,
     COL_CLOUDINARY_URL,
     COL_RESULT,
@@ -154,8 +159,12 @@ def _publish_channel_with_retry(
 ) -> PublishResult:
     """
     Publish to a single channel with retry logic.
+    Only retries transient (retryable) errors; non-retryable errors
+    (validation, permissions, bad media) fail immediately.
     Returns a PublishResult (success or error).
     """
+    from channels.base import BaseChannel
+
     if PUBLISH_MAX_RETRIES < 1:
         raise ValueError("PUBLISH_MAX_RETRIES must be >= 1")
 
@@ -167,6 +176,15 @@ def _publish_channel_with_retry(
         if result.success:
             return result
         last_result = result
+
+        # Non-retryable error → fail immediately, don't waste retries
+        if not BaseChannel.is_retryable_error(result.error_code):
+            logger.warning(
+                f"Row {row_id}: {cid} failed with non-retryable error "
+                f"'{result.error_code}': {result.error_message}"
+            )
+            return result
+
         if attempt < PUBLISH_MAX_RETRIES:
             delay = PUBLISH_RETRY_DELAY * (2 ** (attempt - 1))
             logger.warning(
@@ -213,6 +231,11 @@ def process_row(
         caption_generic = get_cell(row, header, COL_CAPTION)
         caption_ig = get_cell(row, header, COL_CAPTION_IG) or caption_generic
         caption_fb = get_cell(row, header, COL_CAPTION_FB) or caption_generic
+        caption_gbp = get_cell(row, header, COL_CAPTION_GBP)
+        google_location_id = get_cell(row, header, COL_GOOGLE_LOCATION_ID).strip()
+        gbp_post_type = get_cell(row, header, COL_GBP_POST_TYPE).strip()
+        cta_type = get_cell(row, header, COL_CTA_TYPE).strip()
+        cta_url = get_cell(row, header, COL_CTA_URL).strip()
 
         if not drive_file_id:
             _mark_error(header, sheet_row_number, "Missing drive_file_id")
@@ -288,6 +311,11 @@ def process_row(
             "caption": caption_generic,
             COL_CAPTION_IG: caption_ig,
             COL_CAPTION_FB: caption_fb,
+            COL_CAPTION_GBP: caption_gbp,
+            COL_GOOGLE_LOCATION_ID: google_location_id,
+            COL_GBP_POST_TYPE: gbp_post_type,
+            COL_CTA_TYPE: cta_type,
+            COL_CTA_URL: cta_url,
             "cloud_urls": cloud_urls,
             "mime_types": mime_types,
             "post_type": post_type,
@@ -325,11 +353,13 @@ def process_row(
                 error_parts.append(detail)
             raise RuntimeError("; ".join(error_parts))
 
-        # בניית מחרוזת תוצאה
+        # בניית מחרוזת תוצאה — פורמט: CHANNEL:STATUS:detail
         is_multi = len(targets) > 1
-        result_parts = [
-            f"{cid}:{r.platform_post_id}" for cid, r in succeeded.items()
-        ]
+        result_parts = []
+        for cid, r in succeeded.items():
+            result_parts.append(f"{cid}:POSTED:{r.platform_post_id}")
+        for cid, r in failed.items():
+            result_parts.append(f"{cid}:ERROR:{r.error_code}")
         result_str = (
             " | ".join(result_parts) if is_multi
             else str(list(succeeded.values())[0].platform_post_id)
@@ -338,9 +368,9 @@ def process_row(
         if failed:
             # הצלחה חלקית בערוצים שפורסמו
             error_parts = [
-                f"{cid}: {r.error_message}" for cid, r in failed.items()
+                f"{cid}: [{r.error_code}] {r.error_message}" for cid, r in failed.items()
             ]
-            error_detail = f"Partial success ({result_str}). Failures: {'; '.join(error_parts)}"
+            error_detail = f"Partial success. Failures: {'; '.join(error_parts)}"
             logger.warning(f"Row {row_id}: PARTIAL — {error_detail}")
             notify_partial_success(row_id, result_str, "; ".join(error_parts))
             sheets_update_cells(
@@ -638,6 +668,11 @@ def process_partial_row(
         caption_generic = get_cell(row, header, COL_CAPTION)
         caption_ig = get_cell(row, header, COL_CAPTION_IG) or caption_generic
         caption_fb = get_cell(row, header, COL_CAPTION_FB) or caption_generic
+        caption_gbp = get_cell(row, header, COL_CAPTION_GBP)
+        google_location_id = get_cell(row, header, COL_GOOGLE_LOCATION_ID).strip()
+        gbp_post_type = get_cell(row, header, COL_GBP_POST_TYPE).strip()
+        cta_type = get_cell(row, header, COL_CTA_TYPE).strip()
+        cta_url = get_cell(row, header, COL_CTA_URL).strip()
         cloud_urls_str = get_cell(row, header, COL_CLOUDINARY_URL).strip()
         cloud_urls = [u.strip() for u in cloud_urls_str.split(",") if u.strip()]
 
@@ -653,6 +688,11 @@ def process_partial_row(
             "caption": caption_generic,
             COL_CAPTION_IG: caption_ig,
             COL_CAPTION_FB: caption_fb,
+            COL_CAPTION_GBP: caption_gbp,
+            COL_GOOGLE_LOCATION_ID: google_location_id,
+            COL_GBP_POST_TYPE: gbp_post_type,
+            COL_CTA_TYPE: cta_type,
+            COL_CTA_URL: cta_url,
             "cloud_urls": cloud_urls,
             "mime_types": mime_types,
             "post_type": post_type,

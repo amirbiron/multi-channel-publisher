@@ -103,3 +103,23 @@ class BaseChannel:
         if hasattr(exc, "response") and exc.response is not None:
             return f"http_{exc.response.status_code}"
         return "api_error"
+
+    # Error codes considered retryable (transient / infrastructure)
+    _RETRYABLE_ERROR_CODES = frozenset({
+        "timeout",
+        "rate_limit",
+        "api_error",          # generic / unknown — worth retrying
+        "http_500",
+        "http_502",
+        "http_503",
+        "http_504",
+        "http_429",           # rate limit via HTTP status
+        "unhandled_exception",
+    })
+
+    @staticmethod
+    def is_retryable_error(error_code: str | None) -> bool:
+        """Return True if the error code represents a transient failure worth retrying."""
+        if not error_code:
+            return False
+        return error_code in BaseChannel._RETRYABLE_ERROR_CODES

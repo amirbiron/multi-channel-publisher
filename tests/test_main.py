@@ -474,8 +474,8 @@ class TestProcessRowBothNetworks:
         )
         posted_call = mock_sheets.call_args_list[-1]
         assert posted_call[0][1]["status"] == STATUS_POSTED
-        assert "IG:ig_media_888" in posted_call[0][1]["result"]
-        assert "FB:fb_post_999" in posted_call[0][1]["result"]
+        assert "IG:POSTED:ig_media_888" in posted_call[0][1]["result"]
+        assert "FB:POSTED:fb_post_999" in posted_call[0][1]["result"]
 
     @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+FB", caption_ig="ig cap", caption_fb="fb cap"))
     @patch("main.sheets_update_cells")
@@ -634,6 +634,93 @@ class TestPublishChannelWithRetry:
         assert result.success is False
         assert ch.publish.call_count == 2
 
+    @patch("main.PUBLISH_MAX_RETRIES", 3)
+    @patch("main.PUBLISH_RETRY_DELAY", 1)
+    @patch("main.time.sleep")
+    def test_non_retryable_error_stops_immediately(self, mock_sleep):
+        """Non-retryable errors (e.g. http_400) should not retry."""
+        from channels.base import PublishResult
+        non_retryable = PublishResult(
+            channel="TEST", success=False, status="ERROR",
+            error_code="http_400", error_message="Bad request",
+        )
+        ch = self._make_channel([non_retryable])
+        result = _publish_channel_with_retry(ch, {}, row_id="1")
+        assert result.success is False
+        assert result.error_code == "http_400"
+        ch.publish.assert_called_once()  # no retries
+        mock_sleep.assert_not_called()
+
+    @patch("main.PUBLISH_MAX_RETRIES", 3)
+    @patch("main.PUBLISH_RETRY_DELAY", 1)
+    @patch("main.time.sleep")
+    def test_retryable_error_then_non_retryable_stops(self, mock_sleep):
+        """First attempt retryable, second non-retryable → stop at 2."""
+        from channels.base import PublishResult
+        retryable = PublishResult(
+            channel="TEST", success=False, status="ERROR",
+            error_code="timeout", error_message="timed out",
+        )
+        non_retryable = PublishResult(
+            channel="TEST", success=False, status="ERROR",
+            error_code="http_403", error_message="Forbidden",
+        )
+        ch = self._make_channel([retryable, non_retryable])
+        result = _publish_channel_with_retry(ch, {}, row_id="1")
+        assert result.error_code == "http_403"
+        assert ch.publish.call_count == 2
+        assert mock_sleep.call_count == 1
+
+
+# ═══════════════════════════════════════════════════════════════
+#  is_retryable_error classification
+# ═══════════════════════════════════════════════════════════════
+
+class TestIsRetryableError:
+    def test_retryable_codes(self):
+        from channels.base import BaseChannel
+        for code in ["timeout", "rate_limit", "api_error", "http_500",
+                      "http_502", "http_503", "http_504", "http_429"]:
+            assert BaseChannel.is_retryable_error(code) is True, f"{code} should be retryable"
+
+    def test_non_retryable_codes(self):
+        from channels.base import BaseChannel
+        for code in ["http_400", "http_401", "http_403", "http_404", "http_422"]:
+            assert BaseChannel.is_retryable_error(code) is False, f"{code} should NOT be retryable"
+
+    def test_none_is_not_retryable(self):
+        from channels.base import BaseChannel
+        assert BaseChannel.is_retryable_error(None) is False
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Result format includes per-channel status
+# ═══════════════════════════════════════════════════════════════
+
+class TestResultFormat:
+    @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+FB", caption_ig="ig", caption_fb="fb"))
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
+    @patch("meta_publish.fb_publish_feed", side_effect=Exception("FB rate limit"))
+    @patch("meta_publish.ig_publish_feed", return_value="ig_111")
+    @patch("main.PUBLISH_MAX_RETRIES", 1)
+    def test_partial_result_includes_error_code(self, mock_ig, mock_fb,
+                                                 mock_drive, mock_norm, mock_cloud,
+                                                 mock_sheets, mock_reread):
+        """PARTIAL result string should include CHANNEL:ERROR:code for failed channels."""
+        row = _make_row(network="IG+FB", caption_ig="ig", caption_fb="fb")
+        process_row(row, HEADER, 2)
+
+        last_call = mock_sheets.call_args_list[-1]
+        result_str = last_call[0][1]["result"]
+        assert "IG:POSTED:ig_111" in result_str
+        assert "FB:ERROR:" in result_str
+        # Error detail should include error code in brackets
+        error_str = last_call[0][1]["error"]
+        assert "[" in error_str  # error code in brackets
+
 
 # ═══════════════════════════════════════════════════════════════
 #  Schema constants validation
@@ -719,37 +806,59 @@ class TestCaptionFallbackToGeneric:
 # ═══════════════════════════════════════════════════════════════
 
 class TestGBPOnlyNetwork:
-    @patch("main.sheets_read_row", return_value=_in_progress_row(network="GBP"))
+    @patch("main.sheets_read_row", return_value=_in_progress_row(
+        network="GBP", caption_gbp="GBP text", google_location_id="locations/456",
+    ))
     @patch("main.sheets_update_cells")
-    @patch("main.upload_to_cloudinary")
-    @patch("main.drive_download_with_metadata")
-    def test_gbp_only_marks_error_without_io(self, mock_drive, mock_cloud, mock_sheets, mock_reread):
-        row = _make_row(network="GBP")
+    @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
+    @patch("channels.google_auth.get_oauth_manager")
+    @patch("channels.google_business.requests.post")
+    def test_gbp_only_posts_successfully(self, mock_gbp_post, mock_auth,
+                                          mock_drive, mock_norm, mock_cloud,
+                                          mock_sheets, mock_reread):
+        mock_auth.return_value.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"name": "accounts/1/locations/456/localPosts/789"}
+        mock_resp.raise_for_status = MagicMock()
+        mock_gbp_post.return_value = mock_resp
+
+        row = _make_row(network="GBP", caption_gbp="GBP text", google_location_id="locations/456")
         result = process_row(row, HEADER, 2)
 
         assert result is True
         last_call = mock_sheets.call_args_list[-1]
-        assert last_call[0][1]["status"] == STATUS_ERROR
-        assert "not yet implemented" in last_call[0][1]["error"]
-        mock_drive.assert_not_called()
-        mock_cloud.assert_not_called()
+        assert last_call[0][1]["status"] == STATUS_POSTED
 
-    @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+GBP"))
+    @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+GBP", google_location_id="locations/456"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
     @patch("meta_publish.ig_publish_feed", return_value="ig_media_777")
-    def test_mixed_gbp_marks_partial(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
-        row = _make_row(network="IG+GBP")
+    @patch("channels.google_auth.get_oauth_manager")
+    @patch("channels.google_business.requests.post")
+    def test_mixed_ig_gbp_partial_on_gbp_failure(self, mock_gbp_post, mock_auth,
+                                                   mock_ig, mock_drive, mock_norm,
+                                                   mock_cloud, mock_sheets, mock_reread):
+        """IG succeeds, GBP fails → PARTIAL with per-channel result."""
+        mock_auth.return_value.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 403
+        mock_resp.text = "Quota exceeded"
+        mock_resp.raise_for_status.side_effect = Exception("403 Quota exceeded")
+        mock_gbp_post.return_value = mock_resp
+
+        row = _make_row(network="IG+GBP", google_location_id="locations/456")
         result = process_row(row, HEADER, 2)
 
         assert result is True
         mock_ig.assert_called_once()
         last_call = mock_sheets.call_args_list[-1]
         assert last_call[0][1]["status"] == STATUS_PARTIAL
-        assert "GBP" in last_call[0][1]["error"]
-        assert last_call[0][1]["failed_channels"] == "GBP"
+        assert "GBP" in last_call[0][1]["failed_channels"]
         assert "IG" in last_call[0][1]["published_channels"]
 
 

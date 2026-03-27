@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Social Publisher</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="app-layout">
+  <!-- ═══ Sidebar ═══ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo" id="sidebar-logo" onclick="document.getElementById('logo-upload').click()" title="לחצי להחלפת לוגו">
+        <span class="sidebar-logo-text" id="sidebar-logo-text">SP</span>
+        <img class="sidebar-logo-img hidden" id="sidebar-logo-img" alt="לוגו">
+      </div>
+      <input type="file" id="logo-upload" accept="image/*" style="display:none" onchange="handleLogoUpload(event)">
+      <span class="sidebar-title">Social Publisher</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-view="posts" onclick="switchView('posts')">
+        <span class="nav-icon">&#9776;</span>
+        <span class="nav-label">פוסטים</span>
+      </button>
+      <button class="nav-item" data-view="calendar" onclick="switchView('calendar')">
+        <span class="nav-icon">&#128197;</span>
+        <span class="nav-label">לוח שנה</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="sidebar-toggle desktop-only" onclick="toggleSidebar()" title="כווץ/הרחב">
+        &#8592;
+      </button>
+    </div>
+  </aside>
+
+  <!-- Fullscreen toggle lives outside sidebar so it stays visible when sidebar is hidden -->
+  <button class="fullscreen-toggle-btn mobile-only" onclick="toggleFullscreen()" id="fullscreen-toggle" title="מסך מלא">
+    &#9724;
+  </button>
+
+  <!-- ═══ Main Content ═══ -->
+  <main class="main-content">
+
+    <!-- ─── Stats ─── -->
+    <div class="stats-bar" id="stats-bar">
+      <button class="stats-toggle" onclick="toggleStatsBar()" id="stats-toggle" title="סטטיסטיקות">
+        <span class="stats-toggle-label">סטטיסטיקות</span>
+        <span class="stats-toggle-arrow" id="stats-toggle-arrow">&#9660;</span>
+      </button>
+      <div class="stats-content" id="stats-content">
+        <div class="stats-row" id="stats-row">
+          <div class="stat-card">
+            <span class="stat-value" id="stat-total">0</span>
+            <span class="stat-label">סה"כ פוסטים</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="stat-ready" style="color: var(--color-accent)">0</span>
+            <span class="stat-label">ממתינים</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="stat-posted" style="color: var(--color-success)">0</span>
+            <span class="stat-label">פורסמו</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="stat-error" style="color: var(--color-error)">0</span>
+            <span class="stat-label">שגיאות</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Mobile New Post Button ─── -->
+    <button class="mobile-new-post-btn btn btn-primary btn-md" onclick="openCreateModal()">+ פוסט חדש</button>
+
+    <!-- ═══ Posts View ═══ -->
+    <div id="view-posts">
+      <div class="page-header">
+        <h1 class="page-title">פוסטים</h1>
+        <div class="flex items-center gap-sm">
+          <button class="btn btn-ghost btn-md" onclick="loadPosts()" title="רענון">&#8635;</button>
+          <button class="btn btn-primary btn-md" onclick="openCreateModal()">+ פוסט חדש</button>
+        </div>
+      </div>
+
+      <!-- ─── Filter Bar ─── -->
+      <div class="filter-bar" id="filter-bar">
+        <button class="filter-toggle" onclick="toggleFilterBar()" id="filter-toggle" title="סינון">
+          <span class="filter-toggle-label">סינון</span>
+          <span class="filter-toggle-arrow" id="filter-toggle-arrow">&#9660;</span>
+        </button>
+        <div class="filter-content" id="filter-content">
+          <div class="filter-fields">
+            <div class="filter-group">
+              <label class="filter-label">סטטוס</label>
+              <select class="filter-select" id="filter-status" onchange="applyFilters()">
+                <option value="">הכל</option>
+                <option value="READY">ממתין</option>
+                <option value="IN_PROGRESS">בתהליך</option>
+                <option value="POSTED">פורסם</option>
+                <option value="ERROR">שגיאה</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label class="filter-label">רשת</label>
+              <select class="filter-select" id="filter-network" onchange="applyFilters()">
+                <option value="">הכל</option>
+                <option value="IG">אינסטגרם</option>
+                <option value="FB">פייסבוק</option>
+                <option value="IG+FB">IG+FB</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label class="filter-label">מתאריך</label>
+              <input type="date" class="filter-input" id="filter-date-from" onchange="applyFilters()">
+            </div>
+            <div class="filter-group">
+              <label class="filter-label">עד תאריך</label>
+              <input type="date" class="filter-input" id="filter-date-to" onchange="applyFilters()">
+            </div>
+            <div class="filter-group filter-group-search">
+              <label class="filter-label">חיפוש</label>
+              <input type="text" class="filter-input" id="filter-search" placeholder="חיפוש בקפשן..." oninput="applyFilters()">
+            </div>
+            <button class="btn btn-ghost btn-sm filter-clear" onclick="clearFilters()" title="נקה סינון">&#10005; נקה</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div id="posts-loading" class="loading-overlay">
+          <div class="spinner"></div>
+        </div>
+        <div id="posts-empty" class="empty-state hidden">
+          <div class="empty-state-icon">&#128240;</div>
+          <div class="empty-state-text">אין פוסטים עדיין</div>
+          <div class="empty-state-sub">לחצי על "פוסט חדש" כדי להתחיל</div>
+        </div>
+        <div id="posts-table-wrapper" class="posts-table-wrapper hidden">
+          <table class="posts-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>סטטוס</th>
+                <th>רשת</th>
+                <th>סוג</th>
+                <th>תאריך פרסום</th>
+                <th>קפשן IG</th>
+                <th>קפשן FB</th>
+                <th class="th-file" onclick="toggleFileIds()" style="cursor:pointer; user-select:none" title="הצג/הסתר מזהי קבצים">
+                  קובץ <span id="file-id-toggle-arrow" style="font-size:10px">&#9664;</span>
+                </th>
+                <th>פעולות</th>
+              </tr>
+            </thead>
+            <tbody id="posts-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ─── Mobile Cards View ─── -->
+      <div id="posts-cards" class="posts-cards hidden"></div>
+    </div>
+
+    <!-- ═══ Calendar View ═══ -->
+    <div id="view-calendar" class="hidden">
+      <div class="page-header">
+        <h1 class="page-title">לוח שנה</h1>
+      </div>
+
+      <div class="card">
+        <div class="calendar-header">
+          <div class="calendar-nav">
+            <button class="btn btn-ghost btn-sm" onclick="calendarPrev()">&#8594;</button>
+            <span class="calendar-month-title" id="calendar-month-title"></span>
+            <button class="btn btn-ghost btn-sm" onclick="calendarNext()">&#8592;</button>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="calendarToday()">היום</button>
+        </div>
+        <div class="calendar-grid" id="calendar-grid"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ═══ Create/Edit Post Modal ═══ -->
+<div class="modal-backdrop" id="post-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="post-modal-title">פוסט חדש</h2>
+      <button class="modal-close" onclick="closePostModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="form-row-number">
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">רשת</label>
+          <select class="form-select" id="form-network" onchange="onNetworkChange()">
+            <option value="IG+FB">אינסטגרם + פייסבוק</option>
+            <option value="IG">אינסטגרם בלבד</option>
+            <option value="FB">פייסבוק בלבד</option>
+          </select>
+        </div>
+        <div class="form-group" id="post-type-group">
+          <label class="form-label">סוג פוסט</label>
+          <select class="form-select" id="form-post-type">
+            <option value="FEED">פיד (תמונה/וידאו)</option>
+            <option value="REELS">ריל (וידאו)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">תאריך ושעת פרסום</label>
+        <input type="datetime-local" class="form-input" id="form-publish-at">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">קפשן אינסטגרם</label>
+        <textarea class="form-textarea" id="form-caption-ig" rows="3" placeholder="טקסט הפוסט לאינסטגרם..." oninput="updateCharCounter('ig')"></textarea>
+        <div class="char-counter" id="char-counter-ig">
+          <span id="char-count-ig">0</span> / 2,200
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">קפשן פייסבוק</label>
+        <textarea class="form-textarea" id="form-caption-fb" rows="3" placeholder="טקסט הפוסט לפייסבוק (אם שונה מ-IG)..." oninput="updateCharCounter('fb')"></textarea>
+        <div class="char-counter" id="char-counter-fb">
+          <span id="char-count-fb">0</span> / 63,206
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">קובץ מדיה</label>
+        <div id="drive-file-display" class="hidden">
+          <div class="drive-file-id-display">
+            <span class="file-name" id="selected-file-name"></span>
+            <button class="btn btn-ghost btn-sm" onclick="clearDriveFile()">&times;</button>
+          </div>
+        </div>
+        <input type="hidden" id="form-drive-file-id">
+        <div class="flex gap-sm mt-sm">
+          <button class="btn btn-outline btn-md" onclick="openDriveBrowser()" id="btn-browse-drive">
+            &#128193; בחירה מ-Drive
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleManualFileId()" id="btn-manual-id">
+            הזנה ידנית
+          </button>
+        </div>
+        <input type="text" class="form-input hidden mt-sm" id="form-drive-file-id-manual"
+               placeholder="הדביקי כאן את ה-File ID מ-Drive"
+               oninput="document.getElementById('form-drive-file-id').value = this.value">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary btn-md" onclick="savePost()" id="btn-save-post">שמירה</button>
+      <button class="btn btn-ghost btn-md" onclick="closePostModal()">ביטול</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Drive Browser Modal ═══ -->
+<div class="modal-backdrop" id="drive-modal">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <h2 class="modal-title">בחירת קובץ מ-Google Drive</h2>
+      <button class="modal-close" onclick="closeDriveBrowser()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="drive-breadcrumb" id="drive-breadcrumb"></div>
+      <div id="drive-loading" class="loading-overlay hidden">
+        <div class="spinner"></div>
+      </div>
+      <div id="drive-empty" class="empty-state hidden">
+        <div class="empty-state-icon">&#128193;</div>
+        <div class="empty-state-text">התיקייה ריקה</div>
+      </div>
+      <div class="drive-browser" id="drive-browser"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary btn-md" onclick="confirmDriveSelection()" id="btn-confirm-drive" disabled>
+        בחירה
+      </button>
+      <button class="btn btn-ghost btn-md" onclick="closeDriveBrowser()">ביטול</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Confirm Delete Modal ═══ -->
+<div class="modal-backdrop" id="confirm-modal">
+  <div class="modal" style="max-width: 400px">
+    <div class="modal-header">
+      <h2 class="modal-title">מחיקת פוסט</h2>
+      <button class="modal-close" onclick="closeConfirmModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="confirm-text">האם את בטוחה שרוצה למחוק את הפוסט הזה? לא ניתן לבטל פעולה זו.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-destructive btn-md" onclick="confirmDelete()" id="btn-confirm-delete">מחיקה</button>
+      <button class="btn btn-ghost btn-md" onclick="closeConfirmModal()">ביטול</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Toast Container ═══ -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ═══ Caption Preview Modal ═══ -->
+<div class="modal-backdrop" id="caption-modal">
+  <div class="modal" style="max-width: 520px">
+    <div class="modal-header">
+      <h2 class="modal-title" id="caption-modal-title">קפשן</h2>
+      <button class="modal-close" onclick="closeCaptionModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <pre class="caption-preview-text" id="caption-modal-text" dir="auto" style="white-space:pre-wrap; word-break:break-word; font-family:inherit; margin:0; line-height:1.6"></pre>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline btn-md" onclick="copyCaptionText()" id="btn-copy-caption">
+        &#128203; העתקה
+      </button>
+      <button class="btn btn-ghost btn-md" onclick="closeCaptionModal()">סגירה</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Image Lightbox ═══ -->
+<div class="lightbox" id="image-lightbox" onclick="closeLightbox()">
+  <img id="lightbox-img" src="" alt="" onclick="event.stopPropagation()">
+</div>
+
+<!-- ═══ Scroll to Top ═══ -->
+<button class="scroll-top-btn" id="scroll-top-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="חזרה למעלה">&#8593;</button>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

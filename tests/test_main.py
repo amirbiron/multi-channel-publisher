@@ -26,6 +26,7 @@ from main import (
     cleanup_old_cloudinary_assets,
     _CLOUDINARY_URL_RE,
     _publish_channel_with_retry,
+    _RUN_ID,
 )
 
 # ─── Header fixture ──────────────────────────────────────────
@@ -53,6 +54,7 @@ def _make_row(
     status=STATUS_READY,
     google_location_id="",
     source="",
+    processing_by="",
 ):
     """Build a row matching HEADER order."""
     return [
@@ -61,7 +63,7 @@ def _make_row(
         "", "", "", google_location_id,
         drive_id, "", source,
         "", "",
-        "", "", "",
+        "", "", processing_by,
         "", "",
     ]
 
@@ -77,6 +79,7 @@ def _make_row_with_publish_at(publish_at, **kwargs):
 def _in_progress_row(**kwargs):
     """Build a row with PROCESSING status for lock verification tests."""
     kwargs.setdefault("status", STATUS_PROCESSING)
+    kwargs.setdefault("processing_by", _RUN_ID)
     return _make_row(**kwargs)
 
 
@@ -535,8 +538,8 @@ class TestProcessRowCarousel:
     @patch("main.sheets_update_cells")
     @patch("main.sheets_read_row")
     def test_carousel_reels_rejected(self, mock_read_row, mock_update, mock_notify):
-        mock_read_row.return_value = _make_row(status=STATUS_PROCESSING)
-        row = _make_row(network="IG", post_type="REELS", drive_id="a,b", status=STATUS_PROCESSING)
+        mock_read_row.return_value = _in_progress_row()
+        row = _in_progress_row(network="IG", post_type="REELS", drive_id="a,b")
 
         process_row(row, HEADER, 2)
 
@@ -559,8 +562,8 @@ class TestProcessRowCarousel:
     @patch("main.sheets_read_row")
     def test_ig_carousel_success(self, mock_read_row, mock_update, mock_drive,
                                   mock_normalize, mock_cloud, mock_ig_car, mock_notify):
-        mock_read_row.return_value = _make_row(status=STATUS_PROCESSING)
-        row = _make_row(network="IG", post_type="FEED", drive_id="fileA,fileB", status=STATUS_PROCESSING)
+        mock_read_row.return_value = _in_progress_row()
+        row = _in_progress_row(network="IG", post_type="FEED", drive_id="fileA,fileB")
 
         process_row(row, HEADER, 2)
 
@@ -716,9 +719,7 @@ class TestCaptionFallbackToGeneric:
 # ═══════════════════════════════════════════════════════════════
 
 class TestGBPOnlyNetwork:
-    @patch("main.sheets_read_row", return_value=_make_row(
-        status=STATUS_PROCESSING, network="GBP",
-    ))
+    @patch("main.sheets_read_row", return_value=_in_progress_row(network="GBP"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary")
     @patch("main.drive_download_with_metadata")
@@ -733,9 +734,7 @@ class TestGBPOnlyNetwork:
         mock_drive.assert_not_called()
         mock_cloud.assert_not_called()
 
-    @patch("main.sheets_read_row", return_value=_make_row(
-        status=STATUS_PROCESSING, network="IG+GBP",
-    ))
+    @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+GBP"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
@@ -759,7 +758,7 @@ class TestGBPOnlyNetwork:
 # ═══════════════════════════════════════════════════════════════
 
 class TestBackwardCompatibility:
-    @patch("main.sheets_read_row", return_value=_make_row(status=STATUS_PROCESSING))
+    @patch("main.sheets_read_row", return_value=_in_progress_row())
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
     @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))

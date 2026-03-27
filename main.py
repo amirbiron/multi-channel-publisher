@@ -198,9 +198,11 @@ def process_row(
         # ── שלב 0: אימות נעילה (re-read מהטבלה) ──
         fresh_row = sheets_read_row(sheet_row_number)
         fresh_status = get_cell(fresh_row, header, COL_STATUS).strip().upper()
-        if fresh_status != STATUS_PROCESSING:
+        fresh_owner = get_cell(fresh_row, header, COL_PROCESSING_BY).strip()
+        if fresh_status != STATUS_PROCESSING or fresh_owner != _RUN_ID:
             logger.warning(
-                f"Row {row_id}: Status changed to {fresh_status!r} after locking — "
+                f"Row {row_id}: Lock lost (status={fresh_status!r}, "
+                f"owner={fresh_owner!r}, expected={_RUN_ID!r}) — "
                 f"another run may have claimed it. Skipping."
             )
             return False
@@ -612,108 +614,121 @@ def process_partial_row(
         header,
     )
 
-    # Re-read to verify lock
+    # Re-read to verify lock ownership
     fresh_row = sheets_read_row(sheet_row_number)
     fresh_status = get_cell(fresh_row, header, COL_STATUS).strip().upper()
-    if fresh_status != STATUS_PROCESSING:
-        logger.warning(f"Row {row_id}: Status changed during lock — skipping")
+    fresh_owner = get_cell(fresh_row, header, COL_PROCESSING_BY).strip()
+    if fresh_status != STATUS_PROCESSING or fresh_owner != _RUN_ID:
+        logger.warning(
+            f"Row {row_id}: Lock lost (status={fresh_status!r}, "
+            f"owner={fresh_owner!r}, expected={_RUN_ID!r}) — skipping"
+        )
         return False
 
-    network = get_cell(row, header, COL_NETWORK).strip().upper()
-    post_type = get_cell(row, header, COL_POST_TYPE).strip().upper() or POST_TYPE_FEED
-    caption_generic = get_cell(row, header, COL_CAPTION)
-    caption_ig = get_cell(row, header, COL_CAPTION_IG) or caption_generic
-    caption_fb = get_cell(row, header, COL_CAPTION_FB) or caption_generic
-    cloud_urls_str = get_cell(row, header, COL_CLOUDINARY_URL).strip()
-    cloud_urls = [u.strip() for u in cloud_urls_str.split(",") if u.strip()]
+    try:
+        network = get_cell(row, header, COL_NETWORK).strip().upper()
+        post_type = get_cell(row, header, COL_POST_TYPE).strip().upper() or POST_TYPE_FEED
+        caption_generic = get_cell(row, header, COL_CAPTION)
+        caption_ig = get_cell(row, header, COL_CAPTION_IG) or caption_generic
+        caption_fb = get_cell(row, header, COL_CAPTION_FB) or caption_generic
+        cloud_urls_str = get_cell(row, header, COL_CLOUDINARY_URL).strip()
+        cloud_urls = [u.strip() for u in cloud_urls_str.split(",") if u.strip()]
 
-    # Determine mime types from URLs (best-effort)
-    mime_types = []
-    for url in cloud_urls:
-        if any(url.lower().endswith(ext) for ext in (".mp4", ".mov", ".avi")):
-            mime_types.append("video/mp4")
-        else:
-            mime_types.append("image/jpeg")
+        # Determine mime types from URLs (best-effort)
+        mime_types = []
+        for url in cloud_urls:
+            if any(url.lower().endswith(ext) for ext in (".mp4", ".mov", ".avi")):
+                mime_types.append("video/mp4")
+            else:
+                mime_types.append("image/jpeg")
 
-    post_data = {
-        "caption": caption_generic,
-        COL_CAPTION_IG: caption_ig,
-        COL_CAPTION_FB: caption_fb,
-        "cloud_urls": cloud_urls,
-        "mime_types": mime_types,
-        "post_type": post_type,
-    }
+        post_data = {
+            "caption": caption_generic,
+            COL_CAPTION_IG: caption_ig,
+            COL_CAPTION_FB: caption_fb,
+            "cloud_urls": cloud_urls,
+            "mime_types": mime_types,
+            "post_type": post_type,
+        }
 
-    # Publish only to failed channels
-    new_results: dict[str, PublishResult] = {}
-    for cid in retry_targets:
-        if cid in already_published:
-            logger.info(f"Row {row_id}: {cid} already published — skipping")
-            continue
-        channel = _registry.get(cid)
-        logger.info(f"Row {row_id}: Retrying {cid} ({channel.CHANNEL_NAME})...")
-        try:
-            new_results[cid] = _publish_channel_with_retry(
-                channel, post_data, row_id=row_id,
-            )
-        except Exception as exc:
-            logger.exception(f"Row {row_id}: Unexpected error retrying {cid}")
-            new_results[cid] = PublishResult(
-                channel=cid,
-                success=False,
-                status="ERROR",
-                error_code="unexpected_error",
-                error_message=str(exc)[:500],
-            )
+        # Publish only to failed channels
+        new_results: dict[str, PublishResult] = {}
+        for cid in retry_targets:
+            if cid in already_published:
+                logger.info(f"Row {row_id}: {cid} already published — skipping")
+                continue
+            channel = _registry.get(cid)
+            logger.info(f"Row {row_id}: Retrying {cid} ({channel.CHANNEL_NAME})...")
+            try:
+                new_results[cid] = _publish_channel_with_retry(
+                    channel, post_data, row_id=row_id,
+                )
+            except Exception as exc:
+                logger.exception(f"Row {row_id}: Unexpected error retrying {cid}")
+                new_results[cid] = PublishResult(
+                    channel=cid,
+                    success=False,
+                    status="ERROR",
+                    error_code="unexpected_error",
+                    error_message=str(exc)[:500],
+                )
 
-    # Merge results
-    newly_succeeded = {cid for cid, r in new_results.items() if r.success}
-    still_failed = {cid for cid, r in new_results.items() if not r.success}
-    all_published = already_published | newly_succeeded
+        # Merge results
+        newly_succeeded = {cid for cid, r in new_results.items() if r.success}
+        still_failed = {cid for cid, r in new_results.items() if not r.success}
+        all_published = already_published | newly_succeeded
 
-    # Build updated result string
-    existing_result = get_cell(row, header, COL_RESULT).strip()
-    new_result_parts = [
-        f"{cid}:{r.platform_post_id}" for cid, r in new_results.items() if r.success
-    ]
-    if new_result_parts:
-        result_str = f"{existing_result} | {' | '.join(new_result_parts)}" if existing_result else " | ".join(new_result_parts)
-    else:
-        result_str = existing_result
-
-    if still_failed:
-        error_parts = [
-            f"{cid}: {new_results[cid].error_message}" for cid in still_failed
+        # Build updated result string
+        existing_result = get_cell(row, header, COL_RESULT).strip()
+        new_result_parts = [
+            f"{cid}:{r.platform_post_id}" for cid, r in new_results.items() if r.success
         ]
-        sheets_update_cells(
-            sheet_row_number,
-            {
-                COL_STATUS: STATUS_PARTIAL,
-                COL_RESULT: result_str,
-                COL_ERROR: f"Retry partial. Still failed: {'; '.join(error_parts)}"[:500],
-                COL_PUBLISHED_CHANNELS: ",".join(sorted(all_published)),
-                COL_FAILED_CHANNELS: ",".join(sorted(still_failed)),
-                COL_LOCKED_AT: "",
-                COL_PROCESSING_BY: "",
-            },
-            header,
-        )
-        logger.warning(f"Row {row_id}: Still PARTIAL after retry — {still_failed}")
-    else:
-        sheets_update_cells(
-            sheet_row_number,
-            {
-                COL_STATUS: STATUS_POSTED,
-                COL_RESULT: result_str,
-                COL_ERROR: "",
-                COL_PUBLISHED_CHANNELS: ",".join(sorted(all_published)),
-                COL_FAILED_CHANNELS: "",
-                COL_LOCKED_AT: "",
-                COL_PROCESSING_BY: "",
-            },
-            header,
-        )
-        logger.info(f"Row {row_id}: Retry succeeded — now POSTED ({result_str})")
+        if new_result_parts:
+            result_str = f"{existing_result} | {' | '.join(new_result_parts)}" if existing_result else " | ".join(new_result_parts)
+        else:
+            result_str = existing_result
+
+        if still_failed:
+            error_parts = [
+                f"{cid}: {new_results[cid].error_message}" for cid in still_failed
+            ]
+            sheets_update_cells(
+                sheet_row_number,
+                {
+                    COL_STATUS: STATUS_PARTIAL,
+                    COL_RESULT: result_str,
+                    COL_ERROR: f"Retry partial. Still failed: {'; '.join(error_parts)}"[:500],
+                    COL_PUBLISHED_CHANNELS: ",".join(sorted(all_published)),
+                    COL_FAILED_CHANNELS: ",".join(sorted(still_failed)),
+                    COL_LOCKED_AT: "",
+                    COL_PROCESSING_BY: "",
+                },
+                header,
+            )
+            logger.warning(f"Row {row_id}: Still PARTIAL after retry — {still_failed}")
+        else:
+            sheets_update_cells(
+                sheet_row_number,
+                {
+                    COL_STATUS: STATUS_POSTED,
+                    COL_RESULT: result_str,
+                    COL_ERROR: "",
+                    COL_PUBLISHED_CHANNELS: ",".join(sorted(all_published)),
+                    COL_FAILED_CHANNELS: "",
+                    COL_LOCKED_AT: "",
+                    COL_PROCESSING_BY: "",
+                },
+                header,
+            )
+            logger.info(f"Row {row_id}: Retry succeeded — now POSTED ({result_str})")
+
+    except Exception as e:
+        error_detail = str(e)
+        logger.error(f"Row {row_id}: PARTIAL retry ERROR — {error_detail}", exc_info=True)
+        try:
+            _mark_error(header, sheet_row_number, f"Partial retry failed: {error_detail}")
+        except Exception as mark_err:
+            logger.error(f"Row {row_id}: Failed to mark error in sheet: {mark_err}")
 
     return True
 

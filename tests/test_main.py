@@ -439,6 +439,18 @@ class TestCleanup:
         assert mock_delete.call_count == 3
         mock_sheets.assert_called_once()  # cleared URL field once
 
+    @patch("main.sheets_update_cells")
+    @patch("main.delete_from_cloudinary", return_value=True)
+    def test_deletes_partial_row_assets(self, mock_delete, mock_sheets):
+        """PARTIAL rows should also have their Cloudinary assets cleaned up."""
+        rows = [
+            _make_cleanup_row("PARTIAL", "2026-01-01 10:00",
+                              "https://res.cloudinary.com/x/image/upload/v1/social-publisher/partial.jpg"),
+        ]
+        deleted = cleanup_old_cloudinary_assets(HEADER, rows, NOW_UTC)
+        assert deleted == 1
+        mock_delete.assert_called_once_with("social-publisher/partial", resource_type="image")
+
 
 # ═══════════════════════════════════════════════════════════════
 #  process_row — IG+FB (dual publish)

@@ -399,7 +399,7 @@ def cleanup_old_cloudinary_assets(
     now_utc: datetime,
 ) -> int:
     """
-    מוחק נכסים מ-Cloudinary עבור שורות POSTED
+    מוחק נכסים מ-Cloudinary עבור שורות POSTED או PARTIAL
     שפורסמו לפני יותר מ-CLOUDINARY_RETENTION_DAYS ימים.
     מחזיר מספר הנכסים שנמחקו.
     """
@@ -408,7 +408,7 @@ def cleanup_old_cloudinary_assets(
 
     for i, row in enumerate(rows, start=2):
         status = get_cell(row, header, COL_STATUS).strip().upper()
-        if status != STATUS_POSTED:
+        if status not in (STATUS_POSTED, STATUS_PARTIAL):
             continue
 
         cloud_url = get_cell(row, header, COL_CLOUDINARY_URL).strip()

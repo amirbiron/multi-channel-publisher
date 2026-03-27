@@ -82,7 +82,7 @@ class GoogleBusinessChannel(BaseChannel):
 
         # Add image media if available
         if cloud_urls and mime_types:
-            first_mime = mime_types[0] if mime_types else ""
+            first_mime = mime_types[0]
             if first_mime.startswith("image/"):
                 body["media"] = [
                     {

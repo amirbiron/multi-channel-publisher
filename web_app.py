@@ -366,7 +366,10 @@ def api_create_post():
         # Only allow user-editable fields — system fields are set by the server
         allowed_fields = {
             COL_NETWORK, COL_POST_TYPE, COL_PUBLISH_AT,
-            COL_CAPTION_IG, COL_CAPTION_FB, COL_DRIVE_FILE_ID,
+            COL_CAPTION, COL_CAPTION_IG, COL_CAPTION_FB,
+            COL_CAPTION_GBP, COL_GBP_POST_TYPE,
+            COL_GOOGLE_LOCATION_ID, COL_CTA_TYPE, COL_CTA_URL,
+            COL_DRIVE_FILE_ID,
         }
 
         # Build row values in header order
@@ -435,7 +438,10 @@ def api_update_post(row_number):
         # Only allow updating content fields — status is managed by the publisher
         allowed_fields = {
             COL_NETWORK, COL_POST_TYPE, COL_PUBLISH_AT,
-            COL_CAPTION_IG, COL_CAPTION_FB, COL_DRIVE_FILE_ID,
+            COL_CAPTION, COL_CAPTION_IG, COL_CAPTION_FB,
+            COL_CAPTION_GBP, COL_GBP_POST_TYPE,
+            COL_GOOGLE_LOCATION_ID, COL_CTA_TYPE, COL_CTA_URL,
+            COL_DRIVE_FILE_ID,
         }
 
         updates = {}
@@ -480,6 +486,36 @@ def api_delete_post(row_number):
     except Exception as e:
         logger.error(f"Error deleting post: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════
+#  API — Google Business Profile Locations
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/gbp/locations", methods=["GET"])
+def api_gbp_locations():
+    """מחזיר רשימת מיקומי GBP זמינים."""
+    try:
+        from channels.google_locations import get_locations_service, LocationFetchError
+        svc = get_locations_service()
+        locations = svc.list_locations()
+        return jsonify({
+            "locations": [
+                {
+                    "name": loc.get("name", ""),
+                    "title": loc.get("title", ""),
+                    "id": loc.get("name", ""),
+                }
+                for loc in locations
+            ]
+        })
+    except ValueError as e:
+        # GBP_ACCOUNT_ID not configured — return empty list (not an error)
+        logger.debug(f"GBP locations not available: {e}")
+        return jsonify({"locations": []})
+    except Exception as e:
+        logger.error(f"Error fetching GBP locations: {e}", exc_info=True)
+        return jsonify({"locations": [], "error": str(e)})
 
 
 # ═══════════════════════════════════════════════════════════════

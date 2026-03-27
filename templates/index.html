@@ -111,7 +111,11 @@
                 <option value="">הכל</option>
                 <option value="IG">אינסטגרם</option>
                 <option value="FB">פייסבוק</option>
+                <option value="GBP">Google Business</option>
                 <option value="IG+FB">IG+FB</option>
+                <option value="IG+GBP">IG+GBP</option>
+                <option value="FB+GBP">FB+GBP</option>
+                <option value="IG+FB+GBP">IG+FB+GBP</option>
               </select>
             </div>
             <div class="filter-group">
@@ -151,6 +155,7 @@
                 <th>תאריך פרסום</th>
                 <th>קפשן IG</th>
                 <th>קפשן FB</th>
+                <th>קפשן GBP</th>
                 <th class="th-file" onclick="toggleFileIds()" style="cursor:pointer; user-select:none" title="הצג/הסתר מזהי קבצים">
                   קובץ <span id="file-id-toggle-arrow" style="font-size:10px">&#9664;</span>
                 </th>
@@ -200,12 +205,21 @@
 
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">רשת</label>
-          <select class="form-select" id="form-network" onchange="onNetworkChange()">
-            <option value="IG+FB">אינסטגרם + פייסבוק</option>
-            <option value="IG">אינסטגרם בלבד</option>
-            <option value="FB">פייסבוק בלבד</option>
-          </select>
+          <label class="form-label">ערוצים</label>
+          <div class="channel-checkboxes">
+            <label class="channel-checkbox">
+              <input type="checkbox" id="form-ch-ig" onchange="onChannelChange()">
+              <span class="channel-checkbox-label">IG</span>
+            </label>
+            <label class="channel-checkbox">
+              <input type="checkbox" id="form-ch-fb" onchange="onChannelChange()">
+              <span class="channel-checkbox-label">FB</span>
+            </label>
+            <label class="channel-checkbox">
+              <input type="checkbox" id="form-ch-gbp" onchange="onChannelChange()">
+              <span class="channel-checkbox-label">GBP</span>
+            </label>
+          </div>
         </div>
         <div class="form-group" id="post-type-group">
           <label class="form-label">סוג פוסט</label>
@@ -222,18 +236,76 @@
       </div>
 
       <div class="form-group">
-        <label class="form-label">קפשן אינסטגרם</label>
+        <label class="form-label">קפשן כללי</label>
+        <textarea class="form-textarea" id="form-caption" rows="3" placeholder="טקסט הפוסט (משמש כברירת מחדל לכל הערוצים)..." oninput="updateCharCounter('general')"></textarea>
+        <div class="char-counter" id="char-counter-general">
+          <span id="char-count-general">0</span>
+        </div>
+      </div>
+
+      <div class="form-group" id="caption-ig-group">
+        <label class="form-label">קפשן אינסטגרם <span class="form-hint">(אם שונה מהכללי)</span></label>
         <textarea class="form-textarea" id="form-caption-ig" rows="3" placeholder="טקסט הפוסט לאינסטגרם..." oninput="updateCharCounter('ig')"></textarea>
         <div class="char-counter" id="char-counter-ig">
           <span id="char-count-ig">0</span> / 2,200
         </div>
       </div>
 
-      <div class="form-group">
-        <label class="form-label">קפשן פייסבוק</label>
-        <textarea class="form-textarea" id="form-caption-fb" rows="3" placeholder="טקסט הפוסט לפייסבוק (אם שונה מ-IG)..." oninput="updateCharCounter('fb')"></textarea>
+      <div class="form-group" id="caption-fb-group">
+        <label class="form-label">קפשן פייסבוק <span class="form-hint">(אם שונה מהכללי)</span></label>
+        <textarea class="form-textarea" id="form-caption-fb" rows="3" placeholder="טקסט הפוסט לפייסבוק..." oninput="updateCharCounter('fb')"></textarea>
         <div class="char-counter" id="char-counter-fb">
           <span id="char-count-fb">0</span> / 63,206
+        </div>
+      </div>
+
+      <!-- GBP Fields -->
+      <div id="gbp-fields" class="gbp-fields-section hidden">
+        <div class="form-section-divider">
+          <span class="form-section-title">Google Business Profile</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">קפשן GBP <span class="form-hint">(אם שונה מהכללי)</span></label>
+          <textarea class="form-textarea" id="form-caption-gbp" rows="3" placeholder="טקסט הפוסט ל-Google Business..." oninput="updateCharCounter('gbp')"></textarea>
+          <div class="char-counter" id="char-counter-gbp">
+            <span id="char-count-gbp">0</span> / 1,500
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">מיקום Google <span class="form-required">*</span></label>
+          <select class="form-select" id="form-google-location-id">
+            <option value="">בחר מיקום...</option>
+          </select>
+          <input type="text" class="form-input mt-sm hidden" id="form-google-location-id-manual"
+                 placeholder="או הזן Location ID ידנית (למשל locations/123456)">
+          <button class="btn btn-ghost btn-sm mt-sm" onclick="toggleManualLocationId()" id="btn-manual-location">הזנה ידנית</button>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">סוג פוסט GBP</label>
+            <select class="form-select" id="form-gbp-post-type">
+              <option value="STANDARD">רגיל (Standard)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">CTA</label>
+            <select class="form-select" id="form-cta-type" onchange="onCtaTypeChange()">
+              <option value="">ללא</option>
+              <option value="LEARN_MORE">למידע נוסף</option>
+              <option value="CALL">התקשרו</option>
+              <option value="BOOK">הזמינו</option>
+            </select>
+          </div>
+          <div class="form-group" id="cta-url-group">
+            <label class="form-label">כתובת CTA</label>
+            <input type="url" class="form-input" id="form-cta-url" placeholder="https://..." dir="ltr">
+          </div>
         </div>
       </div>
 

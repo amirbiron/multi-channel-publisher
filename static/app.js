@@ -28,7 +28,7 @@ let selectedDriveFiles = [];   // [{id, name}] for multi-select (carousel)
 let filters = { status: '', network: '', dateFrom: '', dateTo: '', search: '' };
 
 // Character limits
-const CHAR_LIMITS = { ig: 2200, fb: 63206 };
+const CHAR_LIMITS = { ig: 2200, fb: 63206, gbp: 1500 };
 
 // Polling state
 let pollTimer = null;
@@ -115,9 +115,11 @@ function getFilteredPosts() {
 
     if (filters.search) {
       const q = filters.search.toLowerCase();
+      const inCaption = (post.caption || '').toLowerCase().includes(q);
       const inIg = (post.caption_ig || '').toLowerCase().includes(q);
       const inFb = (post.caption_fb || '').toLowerCase().includes(q);
-      if (!inIg && !inFb) return false;
+      const inGbp = (post.caption_gbp || '').toLowerCase().includes(q);
+      if (!inCaption && !inIg && !inFb && !inGbp) return false;
     }
 
     return true;
@@ -240,7 +242,7 @@ function renderPosts() {
     // Show "no results" only when filters are active but no posts match
     if (posts.length > 0 && filtered.length === 0) {
       showElement('posts-table-wrapper');
-      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:var(--space-2xl); color:var(--color-text-muted)">לא נמצאו פוסטים לפי הסינון הנוכחי</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:var(--space-2xl); color:var(--color-text-muted)">לא נמצאו פוסטים לפי הסינון הנוכחי</td></tr>`;
       if (cardsEl) {
         cardsEl.classList.remove('hidden');
         cardsEl.innerHTML = `<div class="post-card-empty">לא נמצאו פוסטים לפי הסינון הנוכחי</div>`;
@@ -312,6 +314,7 @@ function renderPosts() {
       <td style="direction:ltr; text-align:start">${publishAt}</td>
       <td class="cell-caption ${post.caption_ig ? 'cell-clickable' : ''}" ${post.caption_ig ? `onclick="openCaptionModal('קפשן IG', this.dataset.full)" data-full="${escapeHtml(post.caption_ig)}"` : ''} title="${escapeHtml(post.caption_ig || '')}">${captionIg}</td>
       <td class="cell-caption ${post.caption_fb ? 'cell-clickable' : ''}" ${post.caption_fb ? `onclick="openCaptionModal('קפשן FB', this.dataset.full)" data-full="${escapeHtml(post.caption_fb)}"` : ''} title="${escapeHtml(post.caption_fb || '')}">${captionFb}</td>
+      <td class="cell-caption ${post.caption_gbp ? 'cell-clickable' : ''}" ${post.caption_gbp ? `onclick="openCaptionModal('קפשן GBP', this.dataset.full)" data-full="${escapeHtml(post.caption_gbp)}"` : ''} title="${escapeHtml(post.caption_gbp || '')}">${truncate(post.caption_gbp, 40)}</td>
       <td class="cell-file">${fileCell}</td>
       <td class="cell-actions">
         ${canEdit ? `<button class="btn btn-ghost btn-sm" onclick="openEditModal(${post._row})" title="עריכה">&#9998;</button>` : ''}
@@ -355,6 +358,14 @@ function renderPosts() {
            </div>`
         : '';
 
+      const captionGbpPart = post.caption_gbp
+        ? `<div class="post-card-divider"></div>
+           <div>
+             <span class="post-card-label">קפשן GBP</span>
+             <div class="post-card-caption" onclick="openCaptionModal('קפשן GBP', this.dataset.full)" data-full="${escapeHtml(post.caption_gbp)}">${escapeHtml(post.caption_gbp)}</div>
+           </div>`
+        : '';
+
       return `<div class="post-card">
         <div class="post-card-row">
           <div>${badge}</div>
@@ -377,6 +388,7 @@ function renderPosts() {
         </div>
         ${captionIgPart}
         ${captionFbPart}
+        ${captionGbpPart}
         ${filePart}
         <div class="post-card-divider"></div>
         <div class="post-card-actions">
@@ -432,14 +444,48 @@ function updateStats() {
 }
 
 // ─── Shared Form Setup ───────────────────────────────────────
-// ─── Network ↔ Post Type Sync ────────────────────────────────
-function onNetworkChange() {
-  const network = document.getElementById('form-network').value;
+// ─── Channel Checkboxes ↔ Post Type / GBP Fields Sync ────────
+function getSelectedChannels() {
+  const channels = [];
+  if (document.getElementById('form-ch-ig').checked) channels.push('IG');
+  if (document.getElementById('form-ch-fb').checked) channels.push('FB');
+  if (document.getElementById('form-ch-gbp').checked) channels.push('GBP');
+  return channels;
+}
+
+function channelsToNetwork(channels) {
+  const sorted = [...channels].sort((a, b) => {
+    const order = { IG: 0, FB: 1, GBP: 2 };
+    return (order[a] || 9) - (order[b] || 9);
+  });
+  return sorted.join('+') || '';
+}
+
+function networkToChannels(network) {
+  if (!network) return ['IG', 'FB'];
+  if (network === 'ALL') return ['IG', 'FB', 'GBP'];
+  return network.split('+').filter(Boolean);
+}
+
+function setChannelCheckboxes(channels) {
+  document.getElementById('form-ch-ig').checked = channels.includes('IG');
+  document.getElementById('form-ch-fb').checked = channels.includes('FB');
+  document.getElementById('form-ch-gbp').checked = channels.includes('GBP');
+}
+
+function onChannelChange() {
+  const channels = getSelectedChannels();
+  const hasIG = channels.includes('IG');
+  const hasFB = channels.includes('FB');
+  const hasGBP = channels.includes('GBP');
   const postTypeSelect = document.getElementById('form-post-type');
-  const isFbOnly = network === 'FB';
   const currentValue = postTypeSelect.value;
 
-  if (isFbOnly) {
+  // Post type: Reels only if IG is selected (not FB-only)
+  const fbOnly = hasFB && !hasIG && !hasGBP;
+  const hasIGSelected = hasIG;
+
+  if (!hasIGSelected) {
     postTypeSelect.innerHTML = '<option value="FEED">תמונה / וידאו</option>';
     postTypeSelect.disabled = true;
   } else {
@@ -449,20 +495,91 @@ function onNetworkChange() {
     postTypeSelect.disabled = false;
     postTypeSelect.value = currentValue;
   }
+
+  // Show/hide per-channel caption groups
+  document.getElementById('caption-ig-group').classList.toggle('hidden', !hasIG);
+  document.getElementById('caption-fb-group').classList.toggle('hidden', !hasFB);
+
+  // Show/hide GBP fields section
+  document.getElementById('gbp-fields').classList.toggle('hidden', !hasGBP);
+}
+
+function onCtaTypeChange() {
+  const ctaType = document.getElementById('form-cta-type').value;
+  document.getElementById('cta-url-group').classList.toggle('hidden', !ctaType);
+}
+
+function toggleManualLocationId() {
+  const el = document.getElementById('form-google-location-id-manual');
+  el.classList.toggle('hidden');
+  if (!el.classList.contains('hidden')) {
+    el.focus();
+  }
+}
+
+async function loadGbpLocations() {
+  const select = document.getElementById('form-google-location-id');
+  try {
+    const resp = await fetch('/api/gbp/locations');
+    const data = await resp.json();
+    if (data.error || !data.locations) return;
+
+    // Keep the first "choose" option, add locations
+    select.innerHTML = '<option value="">בחר מיקום...</option>';
+    data.locations.forEach(loc => {
+      const opt = document.createElement('option');
+      opt.value = loc.name || loc.id;
+      opt.textContent = loc.title || loc.name || loc.id;
+      select.appendChild(opt);
+    });
+  } catch (e) {
+    console.error('Failed to load GBP locations:', e);
+  }
 }
 
 function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'FEED',
-                         publishAt = '', captionIg = '', captionFb = '',
+                         publishAt = '', caption = '', captionIg = '', captionFb = '',
+                         captionGbp = '', gbpPostType = 'STANDARD',
+                         googleLocationId = '', ctaType = '', ctaUrl = '',
                          driveFileId = '', postId = null } = {}) {
   editPostId = postId;
   document.getElementById('post-modal-title').textContent = title;
   document.getElementById('form-row-number').value = rowNumber;
-  document.getElementById('form-network').value = network;
-  onNetworkChange();
+
+  // Set channel checkboxes from network string
+  const channels = networkToChannels(network);
+  setChannelCheckboxes(channels);
+
   document.getElementById('form-post-type').value = postType;
   document.getElementById('form-publish-at').value = publishAt;
+  document.getElementById('form-caption').value = caption;
   document.getElementById('form-caption-ig').value = captionIg;
   document.getElementById('form-caption-fb').value = captionFb;
+  document.getElementById('form-caption-gbp').value = captionGbp;
+  document.getElementById('form-gbp-post-type').value = gbpPostType || 'STANDARD';
+  document.getElementById('form-cta-type').value = ctaType;
+  document.getElementById('form-cta-url').value = ctaUrl;
+
+  // Set google location: try select first, fall back to manual
+  const locationSelect = document.getElementById('form-google-location-id');
+  const locationManual = document.getElementById('form-google-location-id-manual');
+  if (googleLocationId) {
+    // Check if the value exists in the dropdown
+    const optionExists = Array.from(locationSelect.options).some(o => o.value === googleLocationId);
+    if (optionExists) {
+      locationSelect.value = googleLocationId;
+      locationManual.classList.add('hidden');
+    } else {
+      locationSelect.value = '';
+      locationManual.value = googleLocationId;
+      locationManual.classList.remove('hidden');
+    }
+  } else {
+    locationSelect.value = '';
+    locationManual.value = '';
+    locationManual.classList.add('hidden');
+  }
+
   document.getElementById('form-drive-file-id').value = driveFileId;
   document.getElementById('form-drive-file-id-manual').value = '';
 
@@ -476,13 +593,21 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
   }
 
   hideElement('form-drive-file-id-manual');
+
+  // Sync UI visibility
+  onChannelChange();
+  onCtaTypeChange();
+
+  updateCharCounter('general');
   updateCharCounter('ig');
   updateCharCounter('fb');
+  updateCharCounter('gbp');
   openModal('post-modal');
 }
 
 // ─── Create Post ─────────────────────────────────────────────
 function openCreateModal() {
+  loadGbpLocations();
   resetPostForm({ title: 'פוסט חדש' });
 }
 
@@ -501,14 +626,21 @@ function openEditModal(rowNumber) {
     }
   }
 
+  loadGbpLocations();
   resetPostForm({
     title: 'עריכת פוסט',
     rowNumber,
     network: post.network || 'IG+FB',
     postType: post.post_type || 'FEED',
     publishAt,
+    caption: post.caption || '',
     captionIg: post.caption_ig || '',
     captionFb: post.caption_fb || '',
+    captionGbp: post.caption_gbp || '',
+    gbpPostType: post.gbp_post_type || 'STANDARD',
+    googleLocationId: post.google_location_id || '',
+    ctaType: post.cta_type || '',
+    ctaUrl: post.cta_url || '',
     driveFileId: post.drive_file_id || '',
     postId: post.id || null,
   });
@@ -519,12 +651,19 @@ function duplicatePost(rowNumber) {
   const post = posts.find(p => p._row === rowNumber);
   if (!post) return;
 
+  loadGbpLocations();
   resetPostForm({
     title: 'שכפול פוסט',
     network: post.network || 'IG+FB',
     postType: post.post_type || 'FEED',
+    caption: post.caption || '',
     captionIg: post.caption_ig || '',
     captionFb: post.caption_fb || '',
+    captionGbp: post.caption_gbp || '',
+    gbpPostType: post.gbp_post_type || 'STANDARD',
+    googleLocationId: post.google_location_id || '',
+    ctaType: post.cta_type || '',
+    ctaUrl: post.cta_url || '',
     driveFileId: post.drive_file_id || '',
   });
 }
@@ -542,12 +681,27 @@ async function savePost() {
     publishAt = dt.toISOString();
   }
 
+  const channels = getSelectedChannels();
+  const network = channelsToNetwork(channels);
+  const hasGBP = channels.includes('GBP');
+
+  // Get google_location_id from select or manual input
+  const locationSelect = document.getElementById('form-google-location-id').value;
+  const locationManual = document.getElementById('form-google-location-id-manual').value.trim();
+  const googleLocationId = locationSelect || locationManual;
+
   const data = {
-    network: document.getElementById('form-network').value,
+    network: network,
     post_type: document.getElementById('form-post-type').value,
     publish_at: publishAt,
+    caption: document.getElementById('form-caption').value,
     caption_ig: document.getElementById('form-caption-ig').value,
     caption_fb: document.getElementById('form-caption-fb').value,
+    caption_gbp: document.getElementById('form-caption-gbp').value,
+    gbp_post_type: document.getElementById('form-gbp-post-type').value,
+    google_location_id: googleLocationId,
+    cta_type: document.getElementById('form-cta-type').value,
+    cta_url: document.getElementById('form-cta-url').value,
     drive_file_id: document.getElementById('form-drive-file-id').value,
   };
 
@@ -557,12 +711,20 @@ async function savePost() {
   }
 
   // Validation
+  if (channels.length === 0) {
+    showToast('יש לבחור לפחות ערוץ אחד', 'error');
+    return;
+  }
   if (!data.publish_at) {
     showToast('יש לבחור תאריך ושעת פרסום', 'error');
     return;
   }
   if (!data.drive_file_id) {
     showToast('יש לבחור קובץ מדיה', 'error');
+    return;
+  }
+  if (hasGBP && !googleLocationId) {
+    showToast('יש לבחור מיקום Google עבור GBP', 'error');
     return;
   }
 
@@ -842,8 +1004,9 @@ function renderDriveBreadcrumb() {
 }
 
 function _isMultiSelectAllowed() {
-  const network = document.getElementById('form-network').value;
-  return network === 'IG';
+  const channels = getSelectedChannels();
+  // Multi-file carousel only supported for IG-only
+  return channels.length === 1 && channels[0] === 'IG';
 }
 
 function selectDriveFile(el, fileId, fileName) {
@@ -918,7 +1081,8 @@ function toggleManualFileId() {
 
 // ─── Character Counter ──────────────────────────────────────
 function updateCharCounter(type) {
-  const textarea = document.getElementById(`form-caption-${type}`);
+  const inputId = type === 'general' ? 'form-caption' : `form-caption-${type}`;
+  const textarea = document.getElementById(inputId);
   const counter = document.getElementById(`char-counter-${type}`);
   const countSpan = document.getElementById(`char-count-${type}`);
   if (!textarea || !counter || !countSpan) return;
@@ -926,6 +1090,12 @@ function updateCharCounter(type) {
   const len = textarea.value.length;
   const limit = CHAR_LIMITS[type];
   countSpan.textContent = len.toLocaleString();
+
+  if (!limit) {
+    // No limit for general caption
+    counter.classList.remove('over-limit', 'near-limit');
+    return;
+  }
 
   if (len > limit) {
     counter.classList.add('over-limit');
@@ -1038,6 +1208,7 @@ function calendarToday() {
 }
 
 function openCreateModalWithDate(dateStr) {
+  loadGbpLocations();
   resetPostForm({ title: 'פוסט חדש', publishAt: `${dateStr}T12:00` });
 }
 
@@ -1152,7 +1323,12 @@ function networkLabel(network) {
   const map = {
     'IG': 'IG',
     'FB': 'FB',
+    'GBP': 'GBP',
     'IG+FB': 'IG+FB',
+    'IG+GBP': 'IG+GBP',
+    'FB+GBP': 'FB+GBP',
+    'IG+FB+GBP': 'IG+FB+GBP',
+    'ALL': 'הכל',
   };
   return map[network] || escapeHtml(network) || '-';
 }

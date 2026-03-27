@@ -336,6 +336,30 @@ class TestLocationIdHandling:
         assert "locations/locations/" not in url
         assert "locations/456" in url
 
+    @patch("channels.google_auth.get_oauth_manager")
+    @patch("channels.google_business.requests.post")
+    def test_full_resource_path_location_id(self, mock_post, mock_auth, channel):
+        """Full resource path 'accounts/X/locations/Y' should not produce malformed URL."""
+        mock_auth.return_value.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"name": "accounts/1/locations/456/localPosts/3"}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        data = {
+            "google_location_id": "accounts/999/locations/456",
+            "caption_gbp": "Test",
+        }
+
+        with patch("config.GBP_ACCOUNT_ID", "accounts/123"):
+            channel.publish(data)
+
+        call_args = mock_post.call_args
+        url = call_args[0][0] if call_args[0] else call_args.kwargs.get("url", "")
+        assert "locations/accounts/" not in url
+        assert "locations/456" in url
+
 
 # ═══════════════════════════════════════════════════════════════
 #  Registry integration

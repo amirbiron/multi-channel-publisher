@@ -101,8 +101,12 @@ class GoogleBusinessChannel(BaseChannel):
             }
 
         # Construct the API URL
-        # location_id can be "locations/123" or just "123"
-        loc = location_id if location_id.startswith("locations/") else f"locations/{location_id}"
+        # Normalize location_id to "locations/X" form, handling bare IDs,
+        # "locations/X", and full "accounts/A/locations/X" paths.
+        from channels.google_locations import GoogleLocationsService
+        loc = GoogleLocationsService._normalize_location_id(location_id)
+        if not loc.startswith("locations/"):
+            loc = f"locations/{loc}"
         url = f"{_GBP_API_BASE}/{GBP_ACCOUNT_ID}/{loc}/localPosts"
 
         try:

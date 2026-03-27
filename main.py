@@ -672,16 +672,25 @@ def process_partial_row(
             "post_type": post_type,
         }
 
-        # Filter retry targets: skip channels blocked by validation
+        # Filter retry targets: only allow channels that passed validation.
+        # This catches both explicitly-blocked and unvalidated channels
+        # (e.g., channel removed from network field after initial publish).
         validation_blocked_retry = []
+        approved_set = set(report.approved_channels)
         for cid in list(retry_targets):
-            if cid in report.blocked_channels:
+            if cid not in approved_set:
                 validation_blocked_retry.append(cid)
                 retry_targets.remove(cid)
-                for issue in report.blocked_channels[cid]:
+                issues = report.blocked_channels.get(cid, [])
+                if issues:
+                    for issue in issues:
+                        logger.warning(
+                            f"Row {row_id}: {cid} still blocked on retry — "
+                            f"[{issue.code}] {issue.message}"
+                        )
+                else:
                     logger.warning(
-                        f"Row {row_id}: {cid} still blocked on retry — "
-                        f"[{issue.code}] {issue.message}"
+                        f"Row {row_id}: {cid} not in validated channels — skipping retry"
                     )
 
         # Publish only to failed channels

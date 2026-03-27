@@ -207,7 +207,7 @@ class RowValidator:
             return self._build_report(issues, normalized, row_blocked=True)
 
         # Phase 2: Global validation
-        global_issues = self._validate_global(row_data, normalized)
+        global_issues = self._validate_global(normalized)
         issues.extend(global_issues)
 
         if any(i.severity == "ROW_BLOCK" for i in global_issues):
@@ -368,7 +368,7 @@ class RowValidator:
     # ─── Phase 2: Global Validation ──────────────────────────
 
     def _validate_global(
-        self, row_data: dict[str, str], normalized: dict,
+        self, normalized: dict,
     ) -> list[ValidationIssue]:
         issues: list[ValidationIssue] = []
 

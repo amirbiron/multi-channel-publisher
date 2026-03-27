@@ -200,8 +200,8 @@ class GoogleLocationsService:
         """
         if full_name == location_id:
             return True
-        # Allow short form: "locations/Y" matches "accounts/X/locations/Y"
-        if "/" in location_id and full_name.endswith(location_id):
+        # Allow only the "locations/Y" short form
+        if location_id.startswith("locations/") and full_name.endswith("/" + location_id):
             return True
         return False
 

@@ -286,6 +286,18 @@ class TestMatches:
             "accounts/1/locations/2", "2"
         ) is False
 
+    def test_partial_segment_no_match(self):
+        """Partial path segments like 'ons/2' must not match."""
+        assert GoogleLocationsService._matches(
+            "accounts/1/locations/2", "ons/2"
+        ) is False
+
+    def test_cross_boundary_no_match(self):
+        """'1/locations/2' must not match (not a clean segment boundary)."""
+        assert GoogleLocationsService._matches(
+            "accounts/1/locations/2", "1/locations/2"
+        ) is False
+
 
 # ═══════════════════════════════════════════════════════════════
 #  GoogleLocationsService — refresh_cache

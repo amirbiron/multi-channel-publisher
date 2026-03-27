@@ -18,7 +18,8 @@ __all__ = [
 ]
 
 # Feature flag for GBP rollout — set GBP_ENABLED=true to activate
-GBP_ENABLED = os.environ.get("GBP_ENABLED", "true").lower() in ("true", "1", "yes")
+# Defaults to OFF for safe phased rollout (see DEPLOYMENT_CHECKLIST.md)
+GBP_ENABLED = os.environ.get("GBP_ENABLED", "false").lower() in ("true", "1", "yes")
 
 
 def create_default_registry() -> ChannelRegistry:

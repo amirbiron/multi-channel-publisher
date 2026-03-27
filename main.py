@@ -518,7 +518,9 @@ def recover_stale_locks(
     now_utc: datetime,
 ) -> int:
     """
-    Reset rows stuck in PROCESSING beyond LOCK_TIMEOUT_MINUTES back to READY.
+    Reset rows stuck in PROCESSING beyond LOCK_TIMEOUT_MINUTES.
+    Rows with published_channels are restored to PARTIAL (not READY)
+    to avoid re-publishing already-succeeded channels.
     Increments retry_count for each recovered row.
     Returns the number of rows recovered.
     """
@@ -548,14 +550,19 @@ def recover_stale_locks(
         retry_count_str = get_cell(row, header, COL_RETRY_COUNT).strip()
         retry_count = int(retry_count_str) if retry_count_str.isdigit() else 0
 
+        # If some channels already published, restore to PARTIAL to avoid
+        # re-publishing them via the READY loop.
+        published = get_cell(row, header, COL_PUBLISHED_CHANNELS).strip()
+        restore_status = STATUS_PARTIAL if published else STATUS_READY
+
         logger.warning(
-            f"Row {row_id}: PROCESSING lock timed out — resetting to READY "
+            f"Row {row_id}: PROCESSING lock timed out — resetting to {restore_status} "
             f"(retry_count {retry_count} → {retry_count + 1})"
         )
         sheets_update_cells(
             i,
             {
-                COL_STATUS: STATUS_READY,
+                COL_STATUS: restore_status,
                 COL_LOCKED_AT: "",
                 COL_PROCESSING_BY: "",
                 COL_RETRY_COUNT: str(retry_count + 1),

@@ -456,7 +456,7 @@ function getSelectedChannels() {
 function channelsToNetwork(channels) {
   const sorted = [...channels].sort((a, b) => {
     const order = { IG: 0, FB: 1, GBP: 2 };
-    return (order[a] || 9) - (order[b] || 9);
+    return (order[a] ?? 9) - (order[b] ?? 9);
   });
   return sorted.join('+') || '';
 }
@@ -563,9 +563,13 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
   document.getElementById('post-modal-title').textContent = title;
   document.getElementById('form-row-number').value = rowNumber;
 
-  // Set channel checkboxes from network string
+  // Set channel checkboxes and rebuild dropdown options BEFORE setting
+  // post type — onChannelChange() rebuilds the post-type <select> options
+  // based on selected channels, so it must run first to ensure the REELS
+  // option exists when IG is selected.
   const channels = networkToChannels(network);
   setChannelCheckboxes(channels);
+  onChannelChange();
 
   document.getElementById('form-post-type').value = postType;
   document.getElementById('form-publish-at').value = publishAt;
@@ -597,8 +601,7 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
 
   hideElement('form-drive-file-id-manual');
 
-  // Sync UI visibility
-  onChannelChange();
+  // Sync CTA URL visibility
   onCtaTypeChange();
 
   updateCharCounter('general');

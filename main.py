@@ -19,6 +19,7 @@ from dateutil import parser as dtparser
 from config import (
     TZ_IL,
     COL_STATUS,
+    COL_NETWORK,
     COL_POST_TYPE,
     COL_PUBLISH_AT,
     COL_CAPTION,
@@ -54,7 +55,7 @@ from google_api import (
     drive_download_with_metadata,
 )
 from cloud_storage import upload_to_cloudinary, delete_from_cloudinary
-from media_processor import normalize_media, MediaProcessingError
+from media_processor import normalize_media, validate_media_pre_publish, MediaProcessingError
 from channels import create_default_registry, PublishResult
 from notifications import notify_publish_error, notify_partial_success, notify_gbp_error, notify_processing_timeout
 from validator import RowValidator, ValidationReport, format_validation_error, format_blocked_channels_error
@@ -257,6 +258,7 @@ def process_row(
         # ── שלב 2: הורדה מ-Drive + נרמול + העלאה לכל קובץ ──
         drive_file_ids = post_data_norm.get("_drive_file_ids", [])
         post_type = post_data_norm.get("post_type", POST_TYPE_FEED)
+        network = get_cell(row, header, COL_NETWORK, default="").strip()
         is_carousel = len(drive_file_ids) > 1
 
         cloud_urls = []
@@ -274,10 +276,19 @@ def process_row(
                 f"Size: {len(file_bytes)} bytes"
             )
 
+            # וולידציה לפני פרסום
+            validation_error = validate_media_pre_publish(
+                file_bytes, mime_type, post_type, network,
+            )
+            if validation_error:
+                logger.warning(f"Row {row_id}: Pre-publish validation failed: {validation_error}")
+                _mark_error(header, sheet_row_number, validation_error)
+                return True
+
             # נרמול מדיה
             logger.info(f"Row {row_id}: Normalizing media {file_label}...")
             file_bytes, mime_type, file_name = normalize_media(
-                file_bytes, mime_type, file_name, post_type
+                file_bytes, mime_type, file_name, post_type, network
             )
 
             # העלאה ל-Cloudinary

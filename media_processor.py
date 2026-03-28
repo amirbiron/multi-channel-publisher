@@ -14,7 +14,13 @@ import tempfile
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from config import IMAGE_MIMES, POST_TYPE_REELS, VIDEO_MIMES
+from config import (
+    IMAGE_MIMES,
+    NETWORK_FB,
+    NETWORK_IG,
+    POST_TYPE_REELS,
+    VIDEO_MIMES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,15 @@ REELS_MIN_RATIO = 0.5625  # 9:16
 REELS_MAX_RATIO = 1.91    # 1.91:1
 JPEG_QUALITY_STEPS = [85, 80, 75, 70, 68]
 FFMPEG_TIMEOUT = int(os.environ.get("FFMPEG_TIMEOUT", "300"))  # seconds
+
+# ─── Platform-specific limits ────────────────────────────────
+IG_IMAGE_MAX_SIZE = 8_388_608       # 8 MB
+FB_IMAGE_MAX_SIZE = 10_485_760      # 10 MB
+IG_VIDEO_MAX_SIZE = 314_572_800     # 300 MB
+FB_VIDEO_MAX_SIZE = 2_147_483_648   # 2 GB
+IG_VIDEO_MIN_DURATION = 3           # seconds
+IG_VIDEO_MAX_DURATION = 900         # 15 minutes
+IG_REELS_MAX_DURATION = 900         # 15 minutes
 
 
 # ─── Exception ────────────────────────────────────────────────
@@ -45,6 +60,7 @@ def normalize_media(
     mime_type: str,
     file_name: str,
     post_type: str,
+    network: str = "",
 ) -> tuple[bytes, str, str]:
     """נקודת כניסה ראשית — מנרמל מדיה לפי דרישות Meta API.
 
@@ -57,7 +73,7 @@ def normalize_media(
         )
 
     if mime_type in IMAGE_MIMES:
-        return _normalize_image(file_bytes, file_name, post_type)
+        return _normalize_image(file_bytes, file_name, post_type, network)
 
     if mime_type in VIDEO_MIMES:
         return _normalize_video(file_bytes, mime_type, file_name)
@@ -67,9 +83,188 @@ def normalize_media(
     )
 
 
+def validate_media_pre_publish(
+    file_bytes: bytes,
+    mime_type: str,
+    post_type: str,
+    network: str,
+) -> str | None:
+    """בדיקת מדיה לפני פרסום — מחזירה הודעת שגיאה בעברית או None אם תקין.
+
+    בודקת גודל קובץ, יחס גובה-רוחב (תמונות), ומשך (וידאו)
+    בהתאם לדרישות הפלטפורמה (Instagram / Facebook).
+    """
+    if not file_bytes:
+        return None
+
+    publishes_to_ig = network != NETWORK_FB
+    publishes_to_fb = network != NETWORK_IG
+
+    if mime_type in IMAGE_MIMES:
+        return _validate_image_pre_publish(
+            file_bytes, post_type, publishes_to_ig, publishes_to_fb,
+        )
+
+    if mime_type in VIDEO_MIMES:
+        return _validate_video_pre_publish(
+            file_bytes, post_type, publishes_to_ig, publishes_to_fb,
+        )
+
+    return None
+
+
+def _validate_image_pre_publish(
+    file_bytes: bytes,
+    post_type: str,
+    publishes_to_ig: bool,
+    publishes_to_fb: bool,
+) -> str | None:
+    """בדיקת תמונה — יחס גובה-רוחב וגודל קובץ."""
+    file_size = len(file_bytes)
+
+    # בדיקת גודל קובץ
+    if publishes_to_ig and file_size > IG_IMAGE_MAX_SIZE:
+        size_mb = file_size / (1024 * 1024)
+        return f"תמונה גדולה מדי ל-Instagram — {size_mb:.1f}MB (מקסימום 8MB)"
+    if publishes_to_fb and file_size > FB_IMAGE_MAX_SIZE:
+        size_mb = file_size / (1024 * 1024)
+        return f"תמונה גדולה מדי ל-Facebook — {size_mb:.1f}MB (מקסימום 10MB)"
+
+    # בדיקת יחס גובה-רוחב (רק לאינסטגרם)
+    if publishes_to_ig:
+        try:
+            img = Image.open(io.BytesIO(file_bytes))
+            img.load()
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            return "לא ניתן לפתוח את התמונה — ייתכן שהקובץ פגום"
+
+        width, height = img.size
+        if height == 0:
+            return "תמונה לא תקינה — גובה 0 פיקסלים"
+        ratio = width / height
+
+        if post_type == POST_TYPE_REELS:
+            if ratio < REELS_MIN_RATIO or ratio > REELS_MAX_RATIO:
+                return (
+                    f"תמונה לא תקינה ל-Instagram Reels — "
+                    f"יחס {ratio:.2f} (נדרש בין {REELS_MIN_RATIO} ל-{REELS_MAX_RATIO}). "
+                    f"מומלץ 9:16. מידות: {width}x{height}"
+                )
+        else:
+            if ratio < MIN_RATIO or ratio > MAX_RATIO:
+                return (
+                    f"תמונה לא תקינה ל-Instagram — "
+                    f"יחס {ratio:.2f} (נדרש בין {MIN_RATIO} ל-{MAX_RATIO}). "
+                    f"מומלץ 1:1 או 4:5. מידות: {width}x{height}"
+                )
+
+    return None
+
+
+def _validate_video_pre_publish(
+    file_bytes: bytes,
+    post_type: str,
+    publishes_to_ig: bool,
+    publishes_to_fb: bool,
+) -> str | None:
+    """בדיקת וידאו — גודל קובץ, משך, יחס גובה-רוחב."""
+    file_size = len(file_bytes)
+
+    # בדיקת גודל קובץ
+    if publishes_to_ig and file_size > IG_VIDEO_MAX_SIZE:
+        size_mb = file_size / (1024 * 1024)
+        return f"סרטון גדול מדי ל-Instagram — {size_mb:.0f}MB (מקסימום 300MB)"
+    if publishes_to_fb and file_size > FB_VIDEO_MAX_SIZE:
+        size_mb = file_size / (1024 * 1024)
+        return f"סרטון גדול מדי ל-Facebook — {size_mb:.0f}MB (מקסימום 2GB)"
+
+    # בדיקת משך ויחס — צריך ffprobe
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+        probe = _probe_video(tmp_path)
+    except MediaProcessingError:
+        return "לא ניתן לקרוא את הסרטון — ייתכן שהקובץ פגום"
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    # בדיקת משך (רק לאינסטגרם)
+    if publishes_to_ig:
+        duration = _get_video_duration(probe)
+        if duration is not None:
+            if duration < IG_VIDEO_MIN_DURATION:
+                return f"סרטון קצר מדי ל-Instagram — {duration:.1f} שניות (מינימום {IG_VIDEO_MIN_DURATION} שניות)"
+            max_dur = IG_REELS_MAX_DURATION if post_type == POST_TYPE_REELS else IG_VIDEO_MAX_DURATION
+            if duration > max_dur:
+                mins = duration / 60
+                max_mins = max_dur / 60
+                return f"סרטון ארוך מדי ל-Instagram — {mins:.1f} דקות (מקסימום {max_mins:.0f} דקות)"
+
+        # בדיקת יחס גובה-רוחב
+        video_ratio = _get_video_aspect_ratio(probe)
+        if video_ratio is not None:
+            if post_type == POST_TYPE_REELS:
+                if video_ratio < 0.01 or video_ratio > 10.0:
+                    return (
+                        f"סרטון עם יחס לא תקין ל-Instagram Reels — "
+                        f"יחס {video_ratio:.2f} (נדרש בין 0.01 ל-10). מומלץ 9:16"
+                    )
+            else:
+                if video_ratio < MIN_RATIO or video_ratio > MAX_RATIO:
+                    return (
+                        f"סרטון עם יחס לא תקין ל-Instagram — "
+                        f"יחס {video_ratio:.2f} (נדרש בין {MIN_RATIO} ל-{MAX_RATIO}). "
+                        f"מומלץ 1:1 או 4:5"
+                    )
+
+    return None
+
+
+def _get_video_duration(probe: dict) -> float | None:
+    """חילוץ משך הסרטון מתוצאת ffprobe (בשניות)."""
+    # Try format-level duration first
+    fmt = probe.get("format", {})
+    dur_str = fmt.get("duration")
+    if dur_str:
+        try:
+            return float(dur_str)
+        except (ValueError, TypeError):
+            pass
+
+    # Fallback to first video stream duration
+    for stream in probe.get("streams", []):
+        if stream.get("codec_type") == "video":
+            dur_str = stream.get("duration")
+            if dur_str:
+                try:
+                    return float(dur_str)
+                except (ValueError, TypeError):
+                    pass
+    return None
+
+
+def _get_video_aspect_ratio(probe: dict) -> float | None:
+    """חילוץ יחס גובה-רוחב מסטרים הווידאו."""
+    for stream in probe.get("streams", []):
+        if stream.get("codec_type") == "video":
+            w = stream.get("width")
+            h = stream.get("height")
+            if w and h and int(h) > 0:
+                return int(w) / int(h)
+    return None
+
+
 # ─── Image Processing ────────────────────────────────────────
 def _normalize_image(
-    file_bytes: bytes, file_name: str, post_type: str = ""
+    file_bytes: bytes, file_name: str, post_type: str = "", network: str = ""
 ) -> tuple[bytes, str, str]:
     """המרת תמונה ל-JPEG תקין לפי דרישות Instagram API."""
     # 1. Open & fix EXIF orientation
@@ -96,22 +291,24 @@ def _normalize_image(
     if img.mode != "RGB":
         img = img.convert("RGB")
 
-    # 5. Validate aspect ratio
+    # 5. Validate aspect ratio (Instagram only — Facebook has no strict ratio)
     width, height = img.size
     ratio = width / height
-    if post_type == POST_TYPE_REELS:
-        min_r, max_r = REELS_MIN_RATIO, REELS_MAX_RATIO
-        error_code = "INVALID_REELS_RATIO"
-    else:
-        min_r, max_r = MIN_RATIO, MAX_RATIO
-        error_code = "INVALID_FEED_RATIO"
-    if ratio < min_r or ratio > max_r:
-        raise MediaProcessingError(
-            f"Invalid aspect ratio {ratio:.2f} "
-            f"(must be between {min_r} and {max_r}). "
-            f"Image dimensions: {width}x{height}",
-            error_code,
-        )
+    publishes_to_ig = network != NETWORK_FB
+    if publishes_to_ig:
+        if post_type == POST_TYPE_REELS:
+            min_r, max_r = REELS_MIN_RATIO, REELS_MAX_RATIO
+            error_code = "INVALID_REELS_RATIO"
+        else:
+            min_r, max_r = MIN_RATIO, MAX_RATIO
+            error_code = "INVALID_FEED_RATIO"
+        if ratio < min_r or ratio > max_r:
+            raise MediaProcessingError(
+                f"Invalid aspect ratio {ratio:.2f} "
+                f"(must be between {min_r} and {max_r}). "
+                f"Image dimensions: {width}x{height}",
+                error_code,
+            )
 
     # 6. Resize
     if width > TARGET_WIDTH:
@@ -245,7 +442,7 @@ def _probe_video(path: str) -> dict:
             [
                 "ffprobe", "-v", "quiet",
                 "-print_format", "json",
-                "-show_streams", path,
+                "-show_streams", "-show_format", path,
             ],
             capture_output=True,
             timeout=30,

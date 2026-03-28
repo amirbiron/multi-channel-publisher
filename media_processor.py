@@ -232,8 +232,8 @@ def _validate_video_pre_publish(
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-            tmp.write(file_bytes)
             tmp_path = tmp.name
+            tmp.write(file_bytes)
 
         probe = _probe_video(tmp_path)
     except MediaProcessingError:

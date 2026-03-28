@@ -19,7 +19,6 @@ from dateutil import parser as dtparser
 from config import (
     TZ_IL,
     COL_STATUS,
-    COL_NETWORK,
     COL_POST_TYPE,
     COL_PUBLISH_AT,
     COL_CAPTION,
@@ -258,7 +257,9 @@ def process_row(
         # ── שלב 2: הורדה מ-Drive + נרמול + העלאה לכל קובץ ──
         drive_file_ids = post_data_norm.get("_drive_file_ids", [])
         post_type = post_data_norm.get("post_type", POST_TYPE_FEED)
-        network = get_cell(row, header, COL_NETWORK, default="").strip().upper()
+        # Build effective network from approved targets only (not raw sheet value)
+        # so that blocked channels don't affect media validation.
+        effective_network = "+".join(sorted(targets)) if targets else ""
         is_carousel = len(drive_file_ids) > 1
 
         cloud_urls = []
@@ -278,7 +279,7 @@ def process_row(
 
             # וולידציה לפני פרסום
             validation_error = validate_media_pre_publish(
-                file_bytes, mime_type, post_type, network,
+                file_bytes, mime_type, post_type, effective_network,
             )
             if validation_error:
                 logger.warning(f"Row {row_id}: Pre-publish validation failed: {validation_error}")
@@ -289,7 +290,7 @@ def process_row(
             # נרמול מדיה
             logger.info(f"Row {row_id}: Normalizing media {file_label}...")
             file_bytes, mime_type, file_name = normalize_media(
-                file_bytes, mime_type, file_name, post_type, network
+                file_bytes, mime_type, file_name, post_type, effective_network
             )
 
             # העלאה ל-Cloudinary

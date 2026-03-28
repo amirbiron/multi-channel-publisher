@@ -40,8 +40,6 @@ FFMPEG_TIMEOUT = int(os.environ.get("FFMPEG_TIMEOUT", "300"))  # seconds
 # ─── Platform-specific limits ────────────────────────────────
 IG_VIDEO_MAX_SIZE = 314_572_800     # 300 MB
 FB_VIDEO_MAX_SIZE = 2_147_483_648   # 2 GB
-GBP_IMAGE_MIN_SIZE = 10_240         # 10 KB
-GBP_IMAGE_MAX_SIZE = 5_242_880      # 5 MB
 GBP_IMAGE_MIN_DIM = 250             # 250x250 px minimum
 GBP_VIDEO_MAX_SIZE = 78_643_200     # 75 MB
 GBP_VIDEO_MAX_DURATION = 30         # seconds
@@ -58,21 +56,24 @@ def _targets_ig(network: str) -> bool:
     """Does this network value include Instagram?"""
     if not network:
         return True  # default: assume IG (strictest)
-    return network == NETWORK_ALL or NETWORK_IG in network
+    parts = set(network.split("+"))
+    return network == NETWORK_ALL or NETWORK_IG in parts
 
 
 def _targets_fb(network: str) -> bool:
     """Does this network value include Facebook?"""
     if not network:
         return True
-    return network == NETWORK_ALL or NETWORK_FB in network
+    parts = set(network.split("+"))
+    return network == NETWORK_ALL or NETWORK_FB in parts
 
 
 def _targets_gbp(network: str) -> bool:
     """Does this network value include Google Business Profile?"""
     if not network:
         return False  # GBP is opt-in, not assumed by default
-    return network == NETWORK_ALL or NETWORK_GBP in network
+    parts = set(network.split("+"))
+    return network == NETWORK_ALL or NETWORK_GBP in parts
 
 
 # ─── Exception ────────────────────────────────────────────────
@@ -151,23 +152,12 @@ def _validate_image_pre_publish(
     publishes_to_fb: bool,
     publishes_to_gbp: bool,
 ) -> str | None:
-    """בדיקת תמונה — יחס גובה-רוחב (IG), גודל ורזולוציה (GBP).
+    """בדיקת תמונה — יחס גובה-רוחב (IG), רזולוציה (GBP).
 
-    Note: IG/FB image file size is NOT checked here because images are
-    compressed to JPEG by normalize_media().  GBP file size IS checked
-    because Google enforces a strict 5MB limit on the uploaded file.
+    Note: Image file size is NOT checked here for any platform because
+    images are always compressed to JPEG by normalize_media().  The raw
+    bytes may be a large PNG/BMP that compresses well below the limit.
     """
-    file_size = len(file_bytes)
-
-    # GBP — בדיקת גודל קובץ (Google לא דוחסת אוטומטית)
-    if publishes_to_gbp:
-        if file_size < GBP_IMAGE_MIN_SIZE:
-            size_kb = file_size / 1024
-            return f"תמונה קטנה מדי ל-Google Business Profile — {size_kb:.1f}KB (מינימום 10KB)"
-        if file_size > GBP_IMAGE_MAX_SIZE:
-            size_mb = file_size / (1024 * 1024)
-            return f"תמונה גדולה מדי ל-Google Business Profile — {size_mb:.1f}MB (מקסימום 5MB)"
-
     # פתיחת התמונה — נדרש לבדיקות IG ו-GBP
     needs_image_open = publishes_to_ig or publishes_to_gbp
     if needs_image_open:

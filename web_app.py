@@ -383,21 +383,23 @@ def _bg_validate_media(post_id: str, drive_file_ids_raw: str, network: str, post
         return
 
     try:
-        header, rows = sheets_read_all_rows()
-        if not header:
-            return
-
-        row_number = _find_row_by_id(post_id, header, rows)
-        if row_number is None:
-            logger.warning(f"Post {post_id}: Background media validation — post not found in sheet")
-            return
-
+        # Download and validate all files first (before touching the sheet)
         for fid in drive_file_ids:
             file_bytes, metadata = drive_download_with_metadata(fid)
             mime_type = metadata.get("mimeType", "image/jpeg")
 
             error = validate_media_pre_publish(file_bytes, mime_type, post_type, network)
             if error:
+                # Re-read sheet fresh to get current row & verify media hasn't changed
+                header, rows = sheets_read_all_rows()
+                if not header:
+                    return
+                row_number = _find_row_by_id(post_id, header, rows)
+                if row_number is None:
+                    return
+                if _current_drive_file_id(post_id, header, rows) != drive_file_ids_raw:
+                    logger.info(f"Post {post_id}: Media changed since validation started — skipping stale result")
+                    return
                 logger.warning(f"Post {post_id} (row {row_number}): Background media validation failed: {error}")
                 sheets_update_cells(
                     row_number,
@@ -406,10 +408,20 @@ def _bg_validate_media(post_id: str, drive_file_ids_raw: str, network: str, post
                 )
                 return
 
-        # All files passed — if the post was in ERROR from a previous validation,
-        # restore it to READY so it can be published.
-        status_col = header.index(COL_STATUS) if COL_STATUS in header else -1
+        # All files passed — re-read sheet to verify media hasn't changed
+        header, rows = sheets_read_all_rows()
+        if not header:
+            return
+        row_number = _find_row_by_id(post_id, header, rows)
+        if row_number is None:
+            return
+        if _current_drive_file_id(post_id, header, rows) != drive_file_ids_raw:
+            logger.info(f"Post {post_id}: Media changed since validation started — skipping stale result")
+            return
+
+        # If the post was in ERROR from a previous validation, restore to READY
         row_idx = row_number - 2
+        status_col = header.index(COL_STATUS) if COL_STATUS in header else -1
         if 0 <= row_idx < len(rows) and status_col >= 0:
             current_status = rows[row_idx][status_col] if status_col < len(rows[row_idx]) else ""
             if current_status.strip().upper() == STATUS_ERROR:
@@ -422,6 +434,20 @@ def _bg_validate_media(post_id: str, drive_file_ids_raw: str, network: str, post
 
     except Exception as e:
         logger.error(f"Post {post_id}: Background media validation error: {e}", exc_info=True)
+
+
+def _current_drive_file_id(post_id: str, header: list, rows: list) -> str:
+    """מחזיר את ה-drive_file_id הנוכחי של הפוסט מהשיט."""
+    try:
+        id_col = header.index(COL_ID)
+        fid_col = header.index(COL_DRIVE_FILE_ID)
+    except ValueError:
+        return ""
+    for row in rows:
+        val = row[id_col] if id_col < len(row) else ""
+        if str(val) == str(post_id):
+            return row[fid_col].strip() if fid_col < len(row) else ""
+    return ""
 
 
 @app.route("/api/posts", methods=["POST"])

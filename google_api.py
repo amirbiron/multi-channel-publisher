@@ -4,6 +4,7 @@ google_api.py — פונקציות עזר ל-Google Sheets ו-Google Drive
 
 import io
 import logging
+import threading
 from typing import Optional
 
 from google.oauth2 import service_account
@@ -21,11 +22,10 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════
-#  Google Clients (Singleton-ish for one run)
+#  Google Clients — thread-local (httplib2 is NOT thread-safe)
 # ═══════════════════════════════════════════════════════════════
 
-_sheets_service = None
-_drive_service = None
+_local = threading.local()
 
 
 def _get_credentials():
@@ -36,19 +36,21 @@ def _get_credentials():
 
 
 def get_sheets_service():
-    global _sheets_service
-    if _sheets_service is None:
+    svc = getattr(_local, "sheets_service", None)
+    if svc is None:
         creds = _get_credentials()
-        _sheets_service = build("sheets", "v4", credentials=creds)
-    return _sheets_service
+        svc = build("sheets", "v4", credentials=creds)
+        _local.sheets_service = svc
+    return svc
 
 
 def get_drive_service():
-    global _drive_service
-    if _drive_service is None:
+    svc = getattr(_local, "drive_service", None)
+    if svc is None:
         creds = _get_credentials()
-        _drive_service = build("drive", "v3", credentials=creds)
-    return _drive_service
+        svc = build("drive", "v3", credentials=creds)
+        _local.drive_service = svc
+    return svc
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -167,6 +169,25 @@ def drive_get_file_metadata(file_id: str) -> dict:
     return (
         svc.files()
         .get(fileId=file_id, fields="id,name,mimeType,size", supportsAllDrives=True)
+        .execute()
+    )
+
+
+def drive_get_media_metadata(file_id: str) -> dict:
+    """
+    מביא metadata מורחב של קובץ מדיה מ-Drive — כולל מימדי תמונה/וידאו.
+
+    imageMediaMetadata: width, height, rotation
+    videoMediaMetadata: width, height, durationMillis
+    """
+    svc = get_drive_service()
+    return (
+        svc.files()
+        .get(
+            fileId=file_id,
+            fields="id,name,mimeType,size,imageMediaMetadata,videoMediaMetadata",
+            supportsAllDrives=True,
+        )
         .execute()
     )
 

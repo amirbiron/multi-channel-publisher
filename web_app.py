@@ -400,6 +400,11 @@ def _bg_validate_media(post_id: str, drive_file_ids_raw: str, network: str, post
                 if _current_drive_file_id(post_id, header, rows) != drive_file_ids_raw:
                     logger.info(f"Post {post_id}: Media changed since validation started — skipping stale result")
                     return
+                # Only mark ERROR if the post hasn't been picked up by the cron yet
+                current_status = _current_status(row_number, header, rows)
+                if current_status not in (STATUS_READY, STATUS_ERROR):
+                    logger.info(f"Post {post_id}: Status is {current_status}, not overwriting with validation error")
+                    return
                 logger.warning(f"Post {post_id} (row {row_number}): Background media validation failed: {error}")
                 sheets_update_cells(
                     row_number,
@@ -420,17 +425,13 @@ def _bg_validate_media(post_id: str, drive_file_ids_raw: str, network: str, post
             return
 
         # If the post was in ERROR from a previous validation, restore to READY
-        row_idx = row_number - 2
-        status_col = header.index(COL_STATUS) if COL_STATUS in header else -1
-        if 0 <= row_idx < len(rows) and status_col >= 0:
-            current_status = rows[row_idx][status_col] if status_col < len(rows[row_idx]) else ""
-            if current_status.strip().upper() == STATUS_ERROR:
-                logger.info(f"Post {post_id} (row {row_number}): Media now valid — restoring to READY")
-                sheets_update_cells(
-                    row_number,
-                    {COL_STATUS: STATUS_READY, COL_ERROR: ""},
-                    header,
-                )
+        if _current_status(row_number, header, rows) == STATUS_ERROR:
+            logger.info(f"Post {post_id} (row {row_number}): Media now valid — restoring to READY")
+            sheets_update_cells(
+                row_number,
+                {COL_STATUS: STATUS_READY, COL_ERROR: ""},
+                header,
+            )
 
     except Exception as e:
         logger.error(f"Post {post_id}: Background media validation error: {e}", exc_info=True)
@@ -447,6 +448,18 @@ def _current_drive_file_id(post_id: str, header: list, rows: list) -> str:
         val = row[id_col] if id_col < len(row) else ""
         if str(val) == str(post_id):
             return row[fid_col].strip() if fid_col < len(row) else ""
+    return ""
+
+
+def _current_status(row_number: int, header: list, rows: list) -> str:
+    """מחזיר את הסטטוס הנוכחי של שורה לפי row_number."""
+    try:
+        status_col = header.index(COL_STATUS)
+    except ValueError:
+        return ""
+    row_idx = row_number - 2
+    if 0 <= row_idx < len(rows) and status_col < len(rows[row_idx]):
+        return rows[row_idx][status_col].strip().upper()
     return ""
 
 

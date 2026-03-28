@@ -222,7 +222,7 @@ def validate_media_from_metadata(
         width = vid_meta.get("width", 0)
         height = vid_meta.get("height", 0)
         duration_ms = vid_meta.get("durationMillis")
-        duration = int(duration_ms) / 1000.0 if duration_ms else None
+        duration = int(duration_ms) / 1000.0 if duration_ms is not None else None
 
         if publishes_to_ig:
             if duration is not None:

@@ -283,6 +283,7 @@ def process_row(
             if validation_error:
                 logger.warning(f"Row {row_id}: Pre-publish validation failed: {validation_error}")
                 _mark_error(header, sheet_row_number, validation_error)
+                event_logger.log_job_end(success=False, summary=validation_error[:200])
                 return True
 
             # נרמול מדיה

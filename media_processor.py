@@ -37,8 +37,6 @@ JPEG_QUALITY_STEPS = [85, 80, 75, 70, 68]
 FFMPEG_TIMEOUT = int(os.environ.get("FFMPEG_TIMEOUT", "300"))  # seconds
 
 # ─── Platform-specific limits ────────────────────────────────
-IG_IMAGE_MAX_SIZE = 8_388_608       # 8 MB
-FB_IMAGE_MAX_SIZE = 10_485_760      # 10 MB
 IG_VIDEO_MAX_SIZE = 314_572_800     # 300 MB
 FB_VIDEO_MAX_SIZE = 2_147_483_648   # 2 GB
 IG_VIDEO_MIN_DURATION = 3           # seconds

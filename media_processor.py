@@ -145,6 +145,128 @@ def validate_media_pre_publish(
     return None
 
 
+def validate_media_from_metadata(
+    drive_metadata: dict,
+    post_type: str,
+    network: str,
+) -> str | None:
+    """בדיקת מדיה לפי metadata מ-Drive API — בלי להוריד את הקובץ.
+
+    משתמש ב-imageMediaMetadata ו-videoMediaMetadata של Google Drive
+    לבדיקת גודל, יחס גובה-רוחב, משך ורזולוציה.
+    """
+    mime_type = drive_metadata.get("mimeType", "")
+    file_size = int(drive_metadata.get("size", 0))
+
+    publishes_to_ig = _targets_ig(network)
+    publishes_to_fb = _targets_fb(network)
+    publishes_to_gbp = _targets_gbp(network)
+
+    if mime_type in IMAGE_MIMES:
+        img_meta = drive_metadata.get("imageMediaMetadata")
+        if not img_meta:
+            return None  # Drive didn't provide image metadata — skip
+
+        width = img_meta.get("width", 0)
+        height = img_meta.get("height", 0)
+        # Drive reports pre-rotation dimensions; apply rotation
+        rotation = img_meta.get("rotation", 0)
+        if rotation in (90, 270):
+            width, height = height, width
+
+        if height == 0:
+            return "תמונה לא תקינה — גובה 0 פיקסלים"
+
+        if publishes_to_gbp:
+            if width < GBP_IMAGE_MIN_DIM or height < GBP_IMAGE_MIN_DIM:
+                return (
+                    f"תמונה קטנה מדי ל-Google Business Profile — "
+                    f"{width}x{height} (מינימום {GBP_IMAGE_MIN_DIM}x{GBP_IMAGE_MIN_DIM})"
+                )
+
+        if publishes_to_ig:
+            ratio = width / height
+            if post_type == POST_TYPE_REELS:
+                if ratio < REELS_MIN_RATIO or ratio > REELS_MAX_RATIO:
+                    return (
+                        f"תמונה לא תקינה ל-Instagram Reels — "
+                        f"יחס {ratio:.2f} (נדרש בין {REELS_MIN_RATIO} ל-{REELS_MAX_RATIO}). "
+                        f"מומלץ 9:16. מידות: {width}x{height}"
+                    )
+            else:
+                if ratio < MIN_RATIO or ratio > MAX_RATIO:
+                    return (
+                        f"תמונה לא תקינה ל-Instagram — "
+                        f"יחס {ratio:.2f} (נדרש בין {MIN_RATIO} ל-{MAX_RATIO}). "
+                        f"מומלץ 1:1 או 4:5. מידות: {width}x{height}"
+                    )
+
+        return None
+
+    if mime_type in VIDEO_MIMES:
+        # File size checks (pre-transcode — best effort)
+        if publishes_to_ig and file_size > IG_VIDEO_MAX_SIZE:
+            size_mb = file_size / (1024 * 1024)
+            return f"סרטון גדול מדי ל-Instagram — {size_mb:.0f}MB (מקסימום 300MB)"
+        if publishes_to_fb and file_size > FB_VIDEO_MAX_SIZE:
+            size_mb = file_size / (1024 * 1024)
+            return f"סרטון גדול מדי ל-Facebook — {size_mb:.0f}MB (מקסימום 2GB)"
+        if publishes_to_gbp and file_size > GBP_VIDEO_MAX_SIZE:
+            size_mb = file_size / (1024 * 1024)
+            return f"סרטון גדול מדי ל-Google Business Profile — {size_mb:.0f}MB (מקסימום 75MB)"
+
+        vid_meta = drive_metadata.get("videoMediaMetadata")
+        if not vid_meta:
+            return None  # Drive didn't provide video metadata — skip
+
+        width = vid_meta.get("width", 0)
+        height = vid_meta.get("height", 0)
+        duration_ms = vid_meta.get("durationMillis")
+        duration = int(duration_ms) / 1000.0 if duration_ms is not None else None
+
+        if publishes_to_ig:
+            if duration is not None:
+                if duration < IG_VIDEO_MIN_DURATION:
+                    return f"סרטון קצר מדי ל-Instagram — {duration:.1f} שניות (מינימום {IG_VIDEO_MIN_DURATION} שניות)"
+                max_dur = IG_REELS_MAX_DURATION if post_type == POST_TYPE_REELS else IG_VIDEO_MAX_DURATION
+                if duration > max_dur:
+                    mins = duration / 60
+                    max_mins = max_dur / 60
+                    return f"סרטון ארוך מדי ל-Instagram — {mins:.1f} דקות (מקסימום {max_mins:.0f} דקות)"
+
+            if height > 0:
+                video_ratio = width / height
+                if post_type == POST_TYPE_REELS:
+                    if video_ratio < IG_REELS_VIDEO_MIN_RATIO or video_ratio > IG_REELS_VIDEO_MAX_RATIO:
+                        return (
+                            f"סרטון עם יחס לא תקין ל-Instagram Reels — "
+                            f"יחס {video_ratio:.2f} (נדרש בין {IG_REELS_VIDEO_MIN_RATIO} ל-{IG_REELS_VIDEO_MAX_RATIO}). מומלץ 9:16"
+                        )
+                else:
+                    if video_ratio < MIN_RATIO or video_ratio > MAX_RATIO:
+                        return (
+                            f"סרטון עם יחס לא תקין ל-Instagram — "
+                            f"יחס {video_ratio:.2f} (נדרש בין {MIN_RATIO} ל-{MAX_RATIO}). "
+                            f"מומלץ 1:1 או 4:5"
+                        )
+
+        if publishes_to_gbp:
+            if duration is not None and duration > GBP_VIDEO_MAX_DURATION:
+                return (
+                    f"סרטון ארוך מדי ל-Google Business Profile — "
+                    f"{duration:.0f} שניות (מקסימום {GBP_VIDEO_MAX_DURATION} שניות)"
+                )
+            if height > 0 and height < GBP_VIDEO_MIN_HEIGHT:
+                return (
+                    f"סרטון ברזולוציה נמוכה מדי ל-Google Business Profile — "
+                    f"{height}p (מינימום {GBP_VIDEO_MIN_HEIGHT}p)"
+                )
+
+        return None
+
+    return None
+
+
 def _validate_image_pre_publish(
     file_bytes: bytes,
     post_type: str,

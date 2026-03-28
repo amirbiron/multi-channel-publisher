@@ -72,10 +72,10 @@ from google_api import (
     sheets_delete_row,
     col_letter_from_header,
     drive_list_folder,
-    drive_download_with_metadata,
+    drive_get_media_metadata,
     get_drive_service,
 )
-from media_processor import validate_media_pre_publish
+from media_processor import validate_media_from_metadata
 from notifications import notify_health_issue, notify_meta_api_version_expiry, notify_meta_api_version_unknown
 
 # ─── Logging ─────────────────────────────────────────────────
@@ -377,18 +377,17 @@ def _find_row_by_id(post_id: str, header: list, rows: list) -> int | None:
 
 
 def _bg_validate_media(post_id: str, drive_file_ids_raw: str, network: str, post_type: str):
-    """הורדת מדיה מ-Drive וולידציה ברקע — אם נכשל, מסמנים ERROR בטבלה."""
+    """בדיקת מדיה ברקע דרך Drive metadata (בלי הורדת הקובץ)."""
     drive_file_ids = [fid.strip() for fid in drive_file_ids_raw.split(",") if fid.strip()]
     if not drive_file_ids:
         return
 
     try:
-        # Download and validate all files first (before touching the sheet)
+        # Validate all files using Drive metadata (no download needed)
         for fid in drive_file_ids:
-            file_bytes, metadata = drive_download_with_metadata(fid)
-            mime_type = metadata.get("mimeType", "image/jpeg")
+            metadata = drive_get_media_metadata(fid)
 
-            error = validate_media_pre_publish(file_bytes, mime_type, post_type, network)
+            error = validate_media_from_metadata(metadata, post_type, network)
             if error:
                 # Re-read sheet fresh to get current row & verify media hasn't changed
                 header, rows = sheets_read_all_rows()

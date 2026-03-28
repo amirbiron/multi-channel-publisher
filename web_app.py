@@ -363,15 +363,33 @@ def _validate_gbp_fields(data: dict) -> str | None:
 _media_validation_pool = ThreadPoolExecutor(max_workers=2)
 
 
-def _bg_validate_media(sheet_row_number: int, drive_file_ids_raw: str, network: str, post_type: str):
+def _find_row_by_id(post_id: str, header: list, rows: list) -> int | None:
+    """מחזיר sheet row number (1-based) לפי post ID, או None אם לא נמצא."""
+    try:
+        id_col = header.index(COL_ID)
+    except ValueError:
+        return None
+    for i, row in enumerate(rows):
+        val = row[id_col] if id_col < len(row) else ""
+        if str(val) == str(post_id):
+            return i + 2  # header=1, rows are 0-indexed
+    return None
+
+
+def _bg_validate_media(post_id: str, drive_file_ids_raw: str, network: str, post_type: str):
     """הורדת מדיה מ-Drive וולידציה ברקע — אם נכשל, מסמנים ERROR בטבלה."""
     drive_file_ids = [fid.strip() for fid in drive_file_ids_raw.split(",") if fid.strip()]
     if not drive_file_ids:
         return
 
     try:
-        header, _ = sheets_read_all_rows()
+        header, rows = sheets_read_all_rows()
         if not header:
+            return
+
+        row_number = _find_row_by_id(post_id, header, rows)
+        if row_number is None:
+            logger.warning(f"Post {post_id}: Background media validation — post not found in sheet")
             return
 
         for fid in drive_file_ids:
@@ -380,16 +398,30 @@ def _bg_validate_media(sheet_row_number: int, drive_file_ids_raw: str, network: 
 
             error = validate_media_pre_publish(file_bytes, mime_type, post_type, network)
             if error:
-                logger.warning(f"Row {sheet_row_number}: Background media validation failed: {error}")
+                logger.warning(f"Post {post_id} (row {row_number}): Background media validation failed: {error}")
                 sheets_update_cells(
-                    sheet_row_number,
+                    row_number,
                     {COL_STATUS: STATUS_ERROR, COL_ERROR: error[:500]},
                     header,
                 )
                 return
 
+        # All files passed — if the post was in ERROR from a previous validation,
+        # restore it to READY so it can be published.
+        status_col = header.index(COL_STATUS) if COL_STATUS in header else -1
+        row_idx = row_number - 2
+        if 0 <= row_idx < len(rows) and status_col >= 0:
+            current_status = rows[row_idx][status_col] if status_col < len(rows[row_idx]) else ""
+            if current_status.strip().upper() == STATUS_ERROR:
+                logger.info(f"Post {post_id} (row {row_number}): Media now valid — restoring to READY")
+                sheets_update_cells(
+                    row_number,
+                    {COL_STATUS: STATUS_READY, COL_ERROR: ""},
+                    header,
+                )
+
     except Exception as e:
-        logger.error(f"Row {sheet_row_number}: Background media validation error: {e}", exc_info=True)
+        logger.error(f"Post {post_id}: Background media validation error: {e}", exc_info=True)
 
 
 @app.route("/api/posts", methods=["POST"])
@@ -448,10 +480,9 @@ def api_create_post():
         # Background media validation — check the file right after creation
         drive_file_id = data.get(COL_DRIVE_FILE_ID, "").strip()
         if drive_file_id:
-            new_row_number = len(rows) + 2  # header=1, existing rows, new row at end
             _media_validation_pool.submit(
                 _bg_validate_media,
-                new_row_number,
+                next_id,
                 drive_file_id,
                 data.get(COL_NETWORK, ""),
                 data.get(COL_POST_TYPE, POST_TYPE_FEED),
@@ -545,11 +576,12 @@ def api_update_post(row_number):
                     return ""
 
             drive_fid = updates.get(COL_DRIVE_FILE_ID, _existing(COL_DRIVE_FILE_ID)).strip()
-            if drive_fid:
+            post_id = data.get("expected_id") or _existing(COL_ID)
+            if drive_fid and post_id:
                 network = updates.get(COL_NETWORK, _existing(COL_NETWORK))
                 post_type = updates.get(COL_POST_TYPE, _existing(COL_POST_TYPE)) or POST_TYPE_FEED
                 _media_validation_pool.submit(
-                    _bg_validate_media, row_number, drive_fid, network, post_type,
+                    _bg_validate_media, str(post_id), drive_fid, network, post_type,
                 )
 
         return jsonify({"success": True})

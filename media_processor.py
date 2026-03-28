@@ -18,6 +18,7 @@ from config import (
     IMAGE_MIMES,
     NETWORK_FB,
     NETWORK_IG,
+    NETWORK_ALL,
     POST_TYPE_REELS,
     VIDEO_MIMES,
 )
@@ -43,6 +44,21 @@ FB_VIDEO_MAX_SIZE = 2_147_483_648   # 2 GB
 IG_VIDEO_MIN_DURATION = 3           # seconds
 IG_VIDEO_MAX_DURATION = 900         # 15 minutes
 IG_REELS_MAX_DURATION = 900         # 15 minutes
+
+
+# ─── Network helpers ─────────────────────────────────────────
+def _targets_ig(network: str) -> bool:
+    """Does this network value include Instagram?"""
+    if not network:
+        return True  # default: assume IG (strictest)
+    return network == NETWORK_ALL or NETWORK_IG in network
+
+
+def _targets_fb(network: str) -> bool:
+    """Does this network value include Facebook?"""
+    if not network:
+        return True
+    return network == NETWORK_ALL or NETWORK_FB in network
 
 
 # ─── Exception ────────────────────────────────────────────────
@@ -97,8 +113,8 @@ def validate_media_pre_publish(
     if not file_bytes:
         return None
 
-    publishes_to_ig = network != NETWORK_FB
-    publishes_to_fb = network != NETWORK_IG
+    publishes_to_ig = _targets_ig(network)
+    publishes_to_fb = _targets_fb(network)
 
     if mime_type in IMAGE_MIMES:
         return _validate_image_pre_publish(
@@ -119,17 +135,12 @@ def _validate_image_pre_publish(
     publishes_to_ig: bool,
     publishes_to_fb: bool,
 ) -> str | None:
-    """בדיקת תמונה — יחס גובה-רוחב וגודל קובץ."""
-    file_size = len(file_bytes)
+    """בדיקת תמונה — יחס גובה-רוחב.
 
-    # בדיקת גודל קובץ
-    if publishes_to_ig and file_size > IG_IMAGE_MAX_SIZE:
-        size_mb = file_size / (1024 * 1024)
-        return f"תמונה גדולה מדי ל-Instagram — {size_mb:.1f}MB (מקסימום 8MB)"
-    if publishes_to_fb and file_size > FB_IMAGE_MAX_SIZE:
-        size_mb = file_size / (1024 * 1024)
-        return f"תמונה גדולה מדי ל-Facebook — {size_mb:.1f}MB (מקסימום 10MB)"
-
+    Note: file size is NOT checked here because images are compressed
+    to JPEG by normalize_media() — a 12MB PNG will compress well under
+    8MB.  The _compress_jpeg() function handles the final size guard.
+    """
     # בדיקת יחס גובה-רוחב (רק לאינסטגרם)
     if publishes_to_ig:
         try:
@@ -294,7 +305,7 @@ def _normalize_image(
     # 5. Validate aspect ratio (Instagram only — Facebook has no strict ratio)
     width, height = img.size
     ratio = width / height
-    publishes_to_ig = network != NETWORK_FB
+    publishes_to_ig = _targets_ig(network)
     if publishes_to_ig:
         if post_type == POST_TYPE_REELS:
             min_r, max_r = REELS_MIN_RATIO, REELS_MAX_RATIO

@@ -258,7 +258,7 @@ def process_row(
         # ── שלב 2: הורדה מ-Drive + נרמול + העלאה לכל קובץ ──
         drive_file_ids = post_data_norm.get("_drive_file_ids", [])
         post_type = post_data_norm.get("post_type", POST_TYPE_FEED)
-        network = get_cell(row, header, COL_NETWORK, default="").strip()
+        network = get_cell(row, header, COL_NETWORK, default="").strip().upper()
         is_carousel = len(drive_file_ids) > 1
 
         cloud_urls = []

@@ -49,6 +49,8 @@ GBP_VIDEO_MIN_HEIGHT = 720          # 720p minimum
 IG_VIDEO_MIN_DURATION = 3           # seconds
 IG_VIDEO_MAX_DURATION = 900         # 15 minutes
 IG_REELS_MAX_DURATION = 900         # 15 minutes
+IG_REELS_VIDEO_MIN_RATIO = 0.01    # per Meta API docs
+IG_REELS_VIDEO_MAX_RATIO = 10.0    # per Meta API docs
 
 
 # ─── Network helpers ─────────────────────────────────────────
@@ -216,10 +218,16 @@ def _validate_video_pre_publish(
     publishes_to_fb: bool,
     publishes_to_gbp: bool,
 ) -> str | None:
-    """בדיקת וידאו — גודל קובץ, משך, יחס גובה-רוחב."""
+    """בדיקת וידאו — גודל קובץ, משך, יחס גובה-רוחב.
+
+    Note: file size is checked on the raw (pre-transcode) bytes.
+    Transcoding can change the size, but checking here avoids wasting
+    minutes of CPU on a file that is obviously too large.  This is a
+    best-effort early filter, not a strict post-transcode guard.
+    """
     file_size = len(file_bytes)
 
-    # בדיקת גודל קובץ
+    # בדיקת גודל קובץ (pre-transcode — best-effort early filter)
     if publishes_to_ig and file_size > IG_VIDEO_MAX_SIZE:
         size_mb = file_size / (1024 * 1024)
         return f"סרטון גדול מדי ל-Instagram — {size_mb:.0f}MB (מקסימום 300MB)"
@@ -263,10 +271,10 @@ def _validate_video_pre_publish(
 
         if video_ratio is not None:
             if post_type == POST_TYPE_REELS:
-                if video_ratio < 0.01 or video_ratio > 10.0:
+                if video_ratio < IG_REELS_VIDEO_MIN_RATIO or video_ratio > IG_REELS_VIDEO_MAX_RATIO:
                     return (
                         f"סרטון עם יחס לא תקין ל-Instagram Reels — "
-                        f"יחס {video_ratio:.2f} (נדרש בין 0.01 ל-10). מומלץ 9:16"
+                        f"יחס {video_ratio:.2f} (נדרש בין {IG_REELS_VIDEO_MIN_RATIO} ל-{IG_REELS_VIDEO_MAX_RATIO}). מומלץ 9:16"
                     )
             else:
                 if video_ratio < MIN_RATIO or video_ratio > MAX_RATIO:

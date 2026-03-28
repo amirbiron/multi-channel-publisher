@@ -17,6 +17,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from config import (
     IMAGE_MIMES,
     NETWORK_FB,
+    NETWORK_GBP,
     NETWORK_IG,
     NETWORK_ALL,
     POST_TYPE_REELS,
@@ -39,6 +40,12 @@ FFMPEG_TIMEOUT = int(os.environ.get("FFMPEG_TIMEOUT", "300"))  # seconds
 # ─── Platform-specific limits ────────────────────────────────
 IG_VIDEO_MAX_SIZE = 314_572_800     # 300 MB
 FB_VIDEO_MAX_SIZE = 2_147_483_648   # 2 GB
+GBP_IMAGE_MIN_SIZE = 10_240         # 10 KB
+GBP_IMAGE_MAX_SIZE = 5_242_880      # 5 MB
+GBP_IMAGE_MIN_DIM = 250             # 250x250 px minimum
+GBP_VIDEO_MAX_SIZE = 78_643_200     # 75 MB
+GBP_VIDEO_MAX_DURATION = 30         # seconds
+GBP_VIDEO_MIN_HEIGHT = 720          # 720p minimum
 IG_VIDEO_MIN_DURATION = 3           # seconds
 IG_VIDEO_MAX_DURATION = 900         # 15 minutes
 IG_REELS_MAX_DURATION = 900         # 15 minutes
@@ -57,6 +64,13 @@ def _targets_fb(network: str) -> bool:
     if not network:
         return True
     return network == NETWORK_ALL or NETWORK_FB in network
+
+
+def _targets_gbp(network: str) -> bool:
+    """Does this network value include Google Business Profile?"""
+    if not network:
+        return False  # GBP is opt-in, not assumed by default
+    return network == NETWORK_ALL or NETWORK_GBP in network
 
 
 # ─── Exception ────────────────────────────────────────────────
@@ -106,22 +120,23 @@ def validate_media_pre_publish(
     """בדיקת מדיה לפני פרסום — מחזירה הודעת שגיאה בעברית או None אם תקין.
 
     בודקת גודל קובץ, יחס גובה-רוחב (תמונות), ומשך (וידאו)
-    בהתאם לדרישות הפלטפורמה (Instagram / Facebook).
+    בהתאם לדרישות הפלטפורמה (Instagram / Facebook / Google Business Profile).
     """
     if not file_bytes:
         return None
 
     publishes_to_ig = _targets_ig(network)
     publishes_to_fb = _targets_fb(network)
+    publishes_to_gbp = _targets_gbp(network)
 
     if mime_type in IMAGE_MIMES:
         return _validate_image_pre_publish(
-            file_bytes, post_type, publishes_to_ig, publishes_to_fb,
+            file_bytes, post_type, publishes_to_ig, publishes_to_fb, publishes_to_gbp,
         )
 
     if mime_type in VIDEO_MIMES:
         return _validate_video_pre_publish(
-            file_bytes, post_type, publishes_to_ig, publishes_to_fb,
+            file_bytes, post_type, publishes_to_ig, publishes_to_fb, publishes_to_gbp,
         )
 
     return None
@@ -132,15 +147,28 @@ def _validate_image_pre_publish(
     post_type: str,
     publishes_to_ig: bool,
     publishes_to_fb: bool,
+    publishes_to_gbp: bool,
 ) -> str | None:
-    """בדיקת תמונה — יחס גובה-רוחב.
+    """בדיקת תמונה — יחס גובה-רוחב (IG), גודל ורזולוציה (GBP).
 
-    Note: file size is NOT checked here because images are compressed
-    to JPEG by normalize_media() — a 12MB PNG will compress well under
-    8MB.  The _compress_jpeg() function handles the final size guard.
+    Note: IG/FB image file size is NOT checked here because images are
+    compressed to JPEG by normalize_media().  GBP file size IS checked
+    because Google enforces a strict 5MB limit on the uploaded file.
     """
-    # בדיקת יחס גובה-רוחב (רק לאינסטגרם)
-    if publishes_to_ig:
+    file_size = len(file_bytes)
+
+    # GBP — בדיקת גודל קובץ (Google לא דוחסת אוטומטית)
+    if publishes_to_gbp:
+        if file_size < GBP_IMAGE_MIN_SIZE:
+            size_kb = file_size / 1024
+            return f"תמונה קטנה מדי ל-Google Business Profile — {size_kb:.1f}KB (מינימום 10KB)"
+        if file_size > GBP_IMAGE_MAX_SIZE:
+            size_mb = file_size / (1024 * 1024)
+            return f"תמונה גדולה מדי ל-Google Business Profile — {size_mb:.1f}MB (מקסימום 5MB)"
+
+    # פתיחת התמונה — נדרש לבדיקות IG ו-GBP
+    needs_image_open = publishes_to_ig or publishes_to_gbp
+    if needs_image_open:
         try:
             img = Image.open(io.BytesIO(file_bytes))
             img.load()
@@ -151,22 +179,32 @@ def _validate_image_pre_publish(
         width, height = img.size
         if height == 0:
             return "תמונה לא תקינה — גובה 0 פיקסלים"
-        ratio = width / height
 
-        if post_type == POST_TYPE_REELS:
-            if ratio < REELS_MIN_RATIO or ratio > REELS_MAX_RATIO:
+        # GBP — בדיקת רזולוציה מינימלית
+        if publishes_to_gbp:
+            if width < GBP_IMAGE_MIN_DIM or height < GBP_IMAGE_MIN_DIM:
                 return (
-                    f"תמונה לא תקינה ל-Instagram Reels — "
-                    f"יחס {ratio:.2f} (נדרש בין {REELS_MIN_RATIO} ל-{REELS_MAX_RATIO}). "
-                    f"מומלץ 9:16. מידות: {width}x{height}"
+                    f"תמונה קטנה מדי ל-Google Business Profile — "
+                    f"{width}x{height} (מינימום {GBP_IMAGE_MIN_DIM}x{GBP_IMAGE_MIN_DIM})"
                 )
-        else:
-            if ratio < MIN_RATIO or ratio > MAX_RATIO:
-                return (
-                    f"תמונה לא תקינה ל-Instagram — "
-                    f"יחס {ratio:.2f} (נדרש בין {MIN_RATIO} ל-{MAX_RATIO}). "
-                    f"מומלץ 1:1 או 4:5. מידות: {width}x{height}"
-                )
+
+        # IG — בדיקת יחס גובה-רוחב
+        if publishes_to_ig:
+            ratio = width / height
+            if post_type == POST_TYPE_REELS:
+                if ratio < REELS_MIN_RATIO or ratio > REELS_MAX_RATIO:
+                    return (
+                        f"תמונה לא תקינה ל-Instagram Reels — "
+                        f"יחס {ratio:.2f} (נדרש בין {REELS_MIN_RATIO} ל-{REELS_MAX_RATIO}). "
+                        f"מומלץ 9:16. מידות: {width}x{height}"
+                    )
+            else:
+                if ratio < MIN_RATIO or ratio > MAX_RATIO:
+                    return (
+                        f"תמונה לא תקינה ל-Instagram — "
+                        f"יחס {ratio:.2f} (נדרש בין {MIN_RATIO} ל-{MAX_RATIO}). "
+                        f"מומלץ 1:1 או 4:5. מידות: {width}x{height}"
+                    )
 
     return None
 
@@ -176,6 +214,7 @@ def _validate_video_pre_publish(
     post_type: str,
     publishes_to_ig: bool,
     publishes_to_fb: bool,
+    publishes_to_gbp: bool,
 ) -> str | None:
     """בדיקת וידאו — גודל קובץ, משך, יחס גובה-רוחב."""
     file_size = len(file_bytes)
@@ -187,6 +226,9 @@ def _validate_video_pre_publish(
     if publishes_to_fb and file_size > FB_VIDEO_MAX_SIZE:
         size_mb = file_size / (1024 * 1024)
         return f"סרטון גדול מדי ל-Facebook — {size_mb:.0f}MB (מקסימום 2GB)"
+    if publishes_to_gbp and file_size > GBP_VIDEO_MAX_SIZE:
+        size_mb = file_size / (1024 * 1024)
+        return f"סרטון גדול מדי ל-Google Business Profile — {size_mb:.0f}MB (מקסימום 75MB)"
 
     # בדיקת משך ויחס — צריך ffprobe
     tmp_path = None
@@ -205,9 +247,11 @@ def _validate_video_pre_publish(
             except OSError:
                 pass
 
-    # בדיקת משך (רק לאינסטגרם)
+    duration = _get_video_duration(probe)
+    video_ratio = _get_video_aspect_ratio(probe)
+
+    # בדיקות Instagram — משך ויחס
     if publishes_to_ig:
-        duration = _get_video_duration(probe)
         if duration is not None:
             if duration < IG_VIDEO_MIN_DURATION:
                 return f"סרטון קצר מדי ל-Instagram — {duration:.1f} שניות (מינימום {IG_VIDEO_MIN_DURATION} שניות)"
@@ -217,8 +261,6 @@ def _validate_video_pre_publish(
                 max_mins = max_dur / 60
                 return f"סרטון ארוך מדי ל-Instagram — {mins:.1f} דקות (מקסימום {max_mins:.0f} דקות)"
 
-        # בדיקת יחס גובה-רוחב
-        video_ratio = _get_video_aspect_ratio(probe)
         if video_ratio is not None:
             if post_type == POST_TYPE_REELS:
                 if video_ratio < 0.01 or video_ratio > 10.0:
@@ -233,6 +275,20 @@ def _validate_video_pre_publish(
                         f"יחס {video_ratio:.2f} (נדרש בין {MIN_RATIO} ל-{MAX_RATIO}). "
                         f"מומלץ 1:1 או 4:5"
                     )
+
+    # בדיקות GBP — משך ורזולוציה
+    if publishes_to_gbp:
+        if duration is not None and duration > GBP_VIDEO_MAX_DURATION:
+            return (
+                f"סרטון ארוך מדי ל-Google Business Profile — "
+                f"{duration:.0f} שניות (מקסימום {GBP_VIDEO_MAX_DURATION} שניות)"
+            )
+        video_height = _get_video_height(probe)
+        if video_height is not None and video_height < GBP_VIDEO_MIN_HEIGHT:
+            return (
+                f"סרטון ברזולוציה נמוכה מדי ל-Google Business Profile — "
+                f"{video_height}p (מינימום {GBP_VIDEO_MIN_HEIGHT}p)"
+            )
 
     return None
 
@@ -268,6 +324,16 @@ def _get_video_aspect_ratio(probe: dict) -> float | None:
             h = stream.get("height")
             if w and h and int(h) > 0:
                 return int(w) / int(h)
+    return None
+
+
+def _get_video_height(probe: dict) -> int | None:
+    """חילוץ גובה הווידאו בפיקסלים (לבדיקת רזולוציה מינימלית)."""
+    for stream in probe.get("streams", []):
+        if stream.get("codec_type") == "video":
+            h = stream.get("height")
+            if h is not None:
+                return int(h)
     return None
 
 

@@ -136,10 +136,11 @@ class TestProcessRowSuccess:
     @patch("main.sheets_read_row", return_value=_in_progress_row())
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://res.cloudinary.com/x/image/upload/v1/social-publisher/abc.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"}))
     @patch("meta_publish.ig_publish_feed", return_value="media_111")
-    def test_ig_image_feed(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_ig_image_feed(self, mock_ig, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row()
         process_row(row, HEADER, 2)
 
@@ -158,10 +159,11 @@ class TestProcessRowSuccess:
     @patch("main.sheets_read_row", return_value=_in_progress_row(network="FB", caption_ig="", caption_fb="fb caption"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/vid.mp4")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"fake-vid", {"mimeType": "video/mp4", "name": "vid.mp4"}))
     @patch("meta_publish.fb_publish_feed", return_value="post_222")
-    def test_fb_video_feed(self, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_fb_video_feed(self, mock_fb, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row(network="FB", caption_ig="", caption_fb="fb caption")
         process_row(row, HEADER, 3)
 
@@ -177,10 +179,11 @@ class TestProcessRowSuccess:
     @patch("main.sheets_read_row", return_value=_in_progress_row(network="FB", post_type="REELS", caption_ig="", caption_fb="reel caption"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/vid.mp4")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"fake-vid", {"mimeType": "video/mp4", "name": "vid.mp4"}))
     @patch("meta_publish.fb_publish_feed", return_value="reel_333")
-    def test_fb_video_reels(self, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_fb_video_reels(self, mock_fb, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         """post_type=REELS should be passed through to fb_publish_feed."""
         row = _make_row(network="FB", post_type="REELS", caption_ig="", caption_fb="reel caption")
         process_row(row, HEADER, 3)
@@ -195,10 +198,11 @@ class TestProcessRowSuccess:
     @patch("main.sheets_read_row", return_value=_in_progress_row(post_type="REELS"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/vid.mp4")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"fake-vid", {"mimeType": "video/mp4", "name": "vid.mp4"}))
     @patch("meta_publish.ig_publish_feed", return_value="media_444")
-    def test_ig_video_reels(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_ig_video_reels(self, mock_ig, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         """post_type=REELS on IG should pass through."""
         row = _make_row(post_type="REELS")
         process_row(row, HEADER, 2)
@@ -213,10 +217,11 @@ class TestProcessRowSuccess:
     @patch("main.sheets_read_row", return_value=_in_progress_row(post_type=""))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "img.jpg"}))
     @patch("meta_publish.ig_publish_feed", return_value="media_555")
-    def test_empty_post_type_defaults_to_feed(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_empty_post_type_defaults_to_feed(self, mock_ig, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         """If post_type column is empty, should default to FEED."""
         row = _make_row(post_type="")
         process_row(row, HEADER, 2)
@@ -227,10 +232,11 @@ class TestProcessRowSuccess:
     @patch("main.sheets_read_row", return_value=_in_progress_row(caption="generic fallback", caption_ig="", caption_fb="fb text"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "img.jpg"}))
     @patch("meta_publish.ig_publish_feed", return_value="media_333")
-    def test_caption_fallback_ig_uses_generic_if_empty(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_caption_fallback_ig_uses_generic_if_empty(self, mock_ig, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         """If caption_ig is empty, should fallback to generic caption (not caption_fb)."""
         row = _make_row(caption="generic fallback", caption_ig="", caption_fb="fb text")
         process_row(row, HEADER, 2)
@@ -264,8 +270,9 @@ class TestProcessRowErrors:
 
     @patch("main.sheets_read_row", return_value=_in_progress_row())
     @patch("main.sheets_update_cells")
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", side_effect=Exception("Drive API error"))
-    def test_drive_error_marks_error(self, mock_drive, mock_sheets, mock_reread):
+    def test_drive_error_marks_error(self, mock_drive, _mock_vmp, mock_sheets, mock_reread):
         row = _make_row()
         process_row(row, HEADER, 2)
 
@@ -276,11 +283,12 @@ class TestProcessRowErrors:
     @patch("main.sheets_read_row", return_value=_in_progress_row())
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
     @patch("meta_publish.ig_publish_feed", side_effect=Exception("API rate limit"))
     @patch("main.PUBLISH_MAX_RETRIES", 1)
-    def test_publish_error_marks_error(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_publish_error_marks_error(self, mock_ig, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row()
         process_row(row, HEADER, 2)
 
@@ -291,11 +299,12 @@ class TestProcessRowErrors:
     @patch("main.sheets_read_row", return_value=_in_progress_row())
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
     @patch("meta_publish.ig_publish_feed", side_effect=Exception("x" * 600))
     @patch("main.PUBLISH_MAX_RETRIES", 1)
-    def test_long_error_message_truncated(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_long_error_message_truncated(self, mock_ig, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row()
         process_row(row, HEADER, 2)
 
@@ -459,11 +468,12 @@ class TestProcessRowBothNetworks:
     @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+FB", caption_ig="ig cap", caption_fb="fb cap"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"}))
     @patch("meta_publish.fb_publish_feed", return_value="fb_post_999")
     @patch("meta_publish.ig_publish_feed", return_value="ig_media_888")
-    def test_both_networks_success(self, mock_ig, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_both_networks_success(self, mock_ig, mock_fb, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row(network="IG+FB", caption_ig="ig cap", caption_fb="fb cap")
         process_row(row, HEADER, 2)
 
@@ -481,12 +491,13 @@ class TestProcessRowBothNetworks:
     @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+FB", caption_ig="ig cap", caption_fb="fb cap"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"}))
     @patch("meta_publish.fb_publish_feed", side_effect=Exception("FB API error"))
     @patch("meta_publish.ig_publish_feed", return_value="ig_media_888")
     @patch("main.PUBLISH_MAX_RETRIES", 1)
-    def test_both_networks_partial_failure(self, mock_ig, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_both_networks_partial_failure(self, mock_ig, mock_fb, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row(network="IG+FB", caption_ig="ig cap", caption_fb="fb cap")
         process_row(row, HEADER, 2)
 
@@ -501,12 +512,13 @@ class TestProcessRowBothNetworks:
     @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+FB", caption_ig="cap", caption_fb="cap"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"}))
     @patch("meta_publish.fb_publish_feed", side_effect=Exception("FB fail"))
     @patch("meta_publish.ig_publish_feed", side_effect=Exception("IG fail"))
     @patch("main.PUBLISH_MAX_RETRIES", 1)
-    def test_both_networks_all_fail(self, mock_ig, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_both_networks_all_fail(self, mock_ig, mock_fb, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row(network="IG+FB", caption_ig="cap", caption_fb="cap")
         process_row(row, HEADER, 2)
 
@@ -516,11 +528,12 @@ class TestProcessRowBothNetworks:
     @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+FB", caption="shared text", caption_ig="", caption_fb=""))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"}))
     @patch("meta_publish.fb_publish_feed", return_value="fb_222")
     @patch("meta_publish.ig_publish_feed", return_value="ig_111")
-    def test_both_networks_caption_fallback_to_generic(self, mock_ig, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_both_networks_caption_fallback_to_generic(self, mock_ig, mock_fb, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         """Both channels should fallback to generic caption when their specific ones are empty."""
         row = _make_row(network="IG+FB", caption="shared text", caption_ig="", caption_fb="")
         process_row(row, HEADER, 2)
@@ -555,13 +568,14 @@ class TestProcessRowCarousel:
         (b"img1", "image/jpeg", "1.jpg"),
         (b"img2", "image/jpeg", "2.jpg"),
     ])
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", side_effect=[
         (b"raw1", {"mimeType": "image/jpeg", "name": "1.jpg"}),
         (b"raw2", {"mimeType": "image/jpeg", "name": "2.jpg"}),
     ])
     @patch("main.sheets_update_cells")
     @patch("main.sheets_read_row")
-    def test_ig_carousel_success(self, mock_read_row, mock_update, mock_drive,
+    def test_ig_carousel_success(self, mock_read_row, mock_update, mock_drive, _mock_vmp,
                                   mock_normalize, mock_cloud, mock_ig_car, mock_notify):
         mock_read_row.return_value = _in_progress_row()
         row = _in_progress_row(network="IG", post_type="FEED", drive_id="fileA,fileB")
@@ -702,13 +716,14 @@ class TestResultFormat:
     @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+FB", caption_ig="ig", caption_fb="fb"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
     @patch("meta_publish.fb_publish_feed", side_effect=Exception("FB rate limit"))
     @patch("meta_publish.ig_publish_feed", return_value="ig_111")
     @patch("main.PUBLISH_MAX_RETRIES", 1)
     def test_partial_result_includes_error_code(self, mock_ig, mock_fb,
-                                                 mock_drive, mock_norm, mock_cloud,
+                                                 mock_drive, _mock_vmp, mock_norm, mock_cloud,
                                                  mock_sheets, mock_reread):
         """PARTIAL result string should include CHANNEL:ERROR:code for failed channels."""
         row = _make_row(network="IG+FB", caption_ig="ig", caption_fb="fb")
@@ -761,10 +776,11 @@ class TestCaptionFallbackToGeneric:
     ))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
     @patch("meta_publish.ig_publish_feed", return_value="media_gen")
-    def test_ig_falls_back_to_generic_caption(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_ig_falls_back_to_generic_caption(self, mock_ig, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row(caption="generic text", caption_ig="", caption_fb="")
         process_row(row, HEADER, 2)
 
@@ -776,10 +792,11 @@ class TestCaptionFallbackToGeneric:
     ))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
     @patch("meta_publish.fb_publish_feed", return_value="fb_gen")
-    def test_fb_falls_back_to_generic_caption(self, mock_fb, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_fb_falls_back_to_generic_caption(self, mock_fb, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row(network="FB", caption="generic fb", caption_ig="", caption_fb="")
         process_row(row, HEADER, 2)
 
@@ -791,10 +808,11 @@ class TestCaptionFallbackToGeneric:
     ))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
     @patch("meta_publish.ig_publish_feed", return_value="media_spec")
-    def test_channel_caption_takes_precedence(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_channel_caption_takes_precedence(self, mock_ig, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row(caption="generic", caption_ig="specific")
         process_row(row, HEADER, 2)
 
@@ -812,12 +830,13 @@ class TestGBPOnlyNetwork:
     ))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
     @patch("channels.google_auth.get_oauth_manager")
     @patch("channels.google_business.requests.post")
     def test_gbp_only_posts_successfully(self, mock_gbp_post, mock_auth,
-                                          mock_drive, mock_norm, mock_cloud,
+                                          mock_drive, _mock_vmp, mock_norm, mock_cloud,
                                           mock_sheets, mock_reread):
         mock_auth.return_value.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
         mock_resp = MagicMock()
@@ -836,13 +855,14 @@ class TestGBPOnlyNetwork:
     @patch("main.sheets_read_row", return_value=_in_progress_row(network="IG+GBP", google_location_id="locations/456"))
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
     @patch("meta_publish.ig_publish_feed", return_value="ig_media_777")
     @patch("channels.google_auth.get_oauth_manager")
     @patch("channels.google_business.requests.post")
     def test_mixed_ig_gbp_partial_on_gbp_failure(self, mock_gbp_post, mock_auth,
-                                                   mock_ig, mock_drive, mock_norm,
+                                                   mock_ig, mock_drive, _mock_vmp, mock_norm,
                                                    mock_cloud, mock_sheets, mock_reread):
         """IG succeeds, GBP fails → PARTIAL with per-channel result."""
         mock_auth.return_value.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
@@ -957,10 +977,11 @@ class TestBackwardCompatibility:
     @patch("main.sheets_read_row", return_value=_in_progress_row())
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value="https://example.com/img.jpg")
-    @patch("main.normalize_media", side_effect=lambda b, m, n, p: (b, m, n))
+    @patch("main.normalize_media", side_effect=lambda b, m, n, p, *a: (b, m, n))
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=(b"img", {"mimeType": "image/jpeg", "name": "x.jpg"}))
     @patch("meta_publish.ig_publish_feed", return_value="media_100")
-    def test_legacy_ig_row_still_works(self, mock_ig, mock_drive, mock_norm, mock_cloud, mock_sheets, mock_reread):
+    def test_legacy_ig_row_still_works(self, mock_ig, mock_drive, _mock_vmp, mock_norm, mock_cloud, mock_sheets, mock_reread):
         row = _make_row()
         process_row(row, HEADER, 2)
 

@@ -55,11 +55,15 @@ class GoogleBusinessChannel(BaseChannel):
         if not caption:
             errors.append("Missing caption for GBP")
 
-        # If media is provided, only images are allowed
+        # GBP API does not support video uploads — only images allowed
         mime_types = post_data.get("mime_types", [])
         for mt in mime_types:
             if mt and not mt.startswith("image/"):
-                errors.append(f"GBP does not support media type '{mt}'. Only images are allowed.")
+                errors.append(
+                    f"Google Business Profile API does not support video uploads. "
+                    f"Media type '{mt}' is not allowed — only images (image/*) are supported. "
+                    f"Video content for GBP must be uploaded manually."
+                )
                 break
 
         return errors

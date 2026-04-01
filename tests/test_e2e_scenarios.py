@@ -91,7 +91,7 @@ def _locked_row(**kwargs):
 # Standard mocks for Drive → normalize → Cloudinary pipeline
 _DRIVE_RETURN = (b"fake-img", {"mimeType": "image/jpeg", "name": "pic.jpg"})
 _CLOUD_URL = "https://res.cloudinary.com/x/image/upload/v1/social-publisher/abc.jpg"
-_NORM_PASSTHROUGH = lambda b, m, n, p: (b, m, n)  # noqa: E731
+_NORM_PASSTHROUGH = lambda b, m, n, p, *a: (b, m, n)  # noqa: E731
 
 
 def _mock_gbp_success():
@@ -127,10 +127,11 @@ class TestE2E_Scenario1_IG_FB_Only:
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
     @patch("meta_publish.fb_publish_feed", return_value="fb_post_001")
     @patch("meta_publish.ig_publish_feed", return_value="ig_media_001")
-    def test_ig_fb_both_succeed(self, mock_ig, mock_fb, mock_drive, mock_norm,
+    def test_ig_fb_both_succeed(self, mock_ig, mock_fb, mock_drive, _mock_vmp, mock_norm,
                                  mock_cloud, mock_sheets, mock_reread):
         row = _build_row(
             network="IG+FB", caption_ig="IG text", caption_fb="FB text",
@@ -157,9 +158,10 @@ class TestE2E_Scenario1_IG_FB_Only:
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
     @patch("meta_publish.ig_publish_feed", return_value="ig_solo_001")
-    def test_ig_only_regression(self, mock_ig, mock_drive, mock_norm,
+    def test_ig_only_regression(self, mock_ig, mock_drive, _mock_vmp, mock_norm,
                                  mock_cloud, mock_sheets, mock_reread):
         """Single IG post — legacy behavior should be unchanged."""
         row = _build_row(network="IG", caption_ig="IG only")
@@ -179,22 +181,60 @@ class TestE2E_Scenario1_IG_FB_Only:
 # ═══════════════════════════════════════════════════════════════
 
 class TestE2E_Scenario2_GBP_TextOnly:
-    """GBP post with text only (no media) — drive_file_id still required by
-    global validation, but GBP itself supports text-only. For a true text-only
-    GBP we need media present (GBP doesn't require it but global validation does
-    in current implementation)."""
+    """GBP post with text only (no media) — GBP supports text-only posts."""
+
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("channels.google_auth.get_oauth_manager")
+    @patch("channels.google_business.requests.post")
+    def test_gbp_text_only_no_media(self, mock_gbp_post, mock_auth,
+                                      mock_sheets, mock_reread):
+        """GBP STANDARD post with caption only, no drive_file_id — true text-only."""
+        mock_auth.return_value.get_auth_headers.return_value = {
+            "Authorization": "Bearer fake"
+        }
+        mock_gbp_post.return_value = _mock_gbp_success()
+
+        row = _build_row(
+            network="GBP",
+            caption_gbp="Business update text",
+            google_location_id="locations/456",
+            gbp_post_type="STANDARD",
+            drive_file_id="",  # no media!
+        )
+        mock_reread.return_value = _locked_row(
+            network="GBP",
+            caption_gbp="Business update text",
+            google_location_id="locations/456",
+            gbp_post_type="STANDARD",
+            drive_file_id="",
+        )
+
+        process_row(row, HEADER, 2)
+
+        # Verify GBP API was called with text-only body (no media)
+        mock_gbp_post.assert_called_once()
+        call_body = mock_gbp_post.call_args[1]["json"]
+        assert call_body["summary"] == "Business update text"
+        assert call_body["topicType"] == "STANDARD"
+        assert "media" not in call_body
+
+        # Verify status → POSTED
+        final_update = mock_sheets.call_args_list[-1][0][1]
+        assert final_update["status"] == STATUS_POSTED
 
     @patch("main.sheets_read_row")
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
     @patch("channels.google_auth.get_oauth_manager")
     @patch("channels.google_business.requests.post")
-    def test_gbp_text_only_with_image_file(self, mock_gbp_post, mock_auth,
-                                             mock_drive, mock_norm, mock_cloud,
-                                             mock_sheets, mock_reread):
-        """GBP STANDARD post with caption — the image is uploaded but GBP gets it."""
+    def test_gbp_text_with_image_file(self, mock_gbp_post, mock_auth,
+                                        mock_drive, _mock_vmp, mock_norm, mock_cloud,
+                                        mock_sheets, mock_reread):
+        """GBP STANDARD post with caption + image file."""
         mock_auth.return_value.get_auth_headers.return_value = {
             "Authorization": "Bearer fake"
         }
@@ -215,11 +255,11 @@ class TestE2E_Scenario2_GBP_TextOnly:
 
         process_row(row, HEADER, 2)
 
-        # Verify GBP API was called
+        # Verify GBP API was called with media
         mock_gbp_post.assert_called_once()
         call_body = mock_gbp_post.call_args[1]["json"]
         assert call_body["summary"] == "Business update text"
-        assert call_body["topicType"] == "STANDARD"
+        assert "media" in call_body
 
         # Verify status → POSTED
         final_update = mock_sheets.call_args_list[-1][0][1]
@@ -237,11 +277,12 @@ class TestE2E_Scenario3_GBP_TextAndImage:
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
     @patch("channels.google_auth.get_oauth_manager")
     @patch("channels.google_business.requests.post")
     def test_gbp_text_and_image(self, mock_gbp_post, mock_auth,
-                                  mock_drive, mock_norm, mock_cloud,
+                                  mock_drive, _mock_vmp, mock_norm, mock_cloud,
                                   mock_sheets, mock_reread):
         mock_auth.return_value.get_auth_headers.return_value = {
             "Authorization": "Bearer fake"
@@ -277,11 +318,12 @@ class TestE2E_Scenario3_GBP_TextAndImage:
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
     @patch("channels.google_auth.get_oauth_manager")
     @patch("channels.google_business.requests.post")
     def test_gbp_with_cta(self, mock_gbp_post, mock_auth,
-                            mock_drive, mock_norm, mock_cloud,
+                            mock_drive, _mock_vmp, mock_norm, mock_cloud,
                             mock_sheets, mock_reread):
         """GBP post with CTA should include callToAction in API body."""
         mock_auth.return_value.get_auth_headers.return_value = {
@@ -324,6 +366,7 @@ class TestE2E_Scenario4_AllChannels_GBP_Fails:
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
     @patch("meta_publish.fb_publish_feed", return_value="fb_post_004")
     @patch("meta_publish.ig_publish_feed", return_value="ig_media_004")
@@ -332,7 +375,7 @@ class TestE2E_Scenario4_AllChannels_GBP_Fails:
     @patch("main.PUBLISH_MAX_RETRIES", 1)
     def test_partial_when_gbp_fails(self, mock_gbp_post, mock_auth,
                                       mock_ig, mock_fb,
-                                      mock_drive, mock_norm, mock_cloud,
+                                      mock_drive, _mock_vmp, mock_norm, mock_cloud,
                                       mock_sheets, mock_reread):
         mock_auth.return_value.get_auth_headers.return_value = {
             "Authorization": "Bearer fake"
@@ -540,8 +583,9 @@ class TestE2E_Scenario6_Location_Invalid:
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
-    def test_gbp_only_missing_location_blocks_row(self, mock_drive, mock_norm,
+    def test_gbp_only_missing_location_blocks_row(self, mock_drive, _mock_vmp, mock_norm,
                                                      mock_cloud, mock_sheets,
                                                      mock_reread):
         """GBP-only post without location_id → row ERROR (no channels can publish)."""
@@ -567,9 +611,10 @@ class TestE2E_Scenario6_Location_Invalid:
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
     @patch("meta_publish.ig_publish_feed", return_value="ig_media_006")
-    def test_ig_gbp_missing_location_partial(self, mock_ig, mock_drive, mock_norm,
+    def test_ig_gbp_missing_location_partial(self, mock_ig, mock_drive, _mock_vmp, mock_norm,
                                                mock_cloud, mock_sheets, mock_reread):
         """IG+GBP with missing location → IG publishes, GBP blocked → PARTIAL."""
         row = _build_row(
@@ -606,12 +651,13 @@ class TestE2E_Scenario7_Caption_Fallback:
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
     @patch("channels.google_auth.get_oauth_manager")
     @patch("channels.google_business.requests.post")
     def test_gbp_uses_generic_caption_when_specific_missing(
         self, mock_gbp_post, mock_auth,
-        mock_drive, mock_norm, mock_cloud,
+        mock_drive, _mock_vmp, mock_norm, mock_cloud,
         mock_sheets, mock_reread,
     ):
         mock_auth.return_value.get_auth_headers.return_value = {
@@ -647,13 +693,14 @@ class TestE2E_Scenario7_Caption_Fallback:
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
     @patch("meta_publish.ig_publish_feed", return_value="ig_media_007")
     @patch("channels.google_auth.get_oauth_manager")
     @patch("channels.google_business.requests.post")
     def test_all_channels_use_generic_caption_fallback(
         self, mock_gbp_post, mock_auth, mock_ig,
-        mock_drive, mock_norm, mock_cloud,
+        mock_drive, _mock_vmp, mock_norm, mock_cloud,
         mock_sheets, mock_reread,
     ):
         """IG+GBP: both use generic caption when channel-specific captions are empty."""
@@ -691,8 +738,9 @@ class TestE2E_Scenario7_Caption_Fallback:
     @patch("main.sheets_update_cells")
     @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
     @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
     @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
-    def test_no_caption_at_all_blocks_gbp(self, mock_drive, mock_norm,
+    def test_no_caption_at_all_blocks_gbp(self, mock_drive, _mock_vmp, mock_norm,
                                             mock_cloud, mock_sheets, mock_reread):
         """GBP with neither caption_gbp nor generic caption → blocked."""
         row = _build_row(

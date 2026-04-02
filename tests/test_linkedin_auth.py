@@ -215,11 +215,9 @@ class TestThreadSafety:
     @patch("channels.linkedin_auth.requests.post")
     def test_concurrent_access_single_refresh(self, mock_post):
         """Multiple threads requesting token should only trigger one refresh."""
-        call_count = {"value": 0}
         barrier = threading.Barrier(5, timeout=5)
 
         def slow_post(*args, **kwargs):
-            call_count["value"] += 1
             resp = MagicMock()
             resp.status_code = 200
             resp.json.return_value = {
@@ -237,6 +235,7 @@ class TestThreadSafety:
 
         def worker():
             try:
+                barrier.wait()  # Synchronize all threads to start concurrently
                 token = mgr.get_access_token()
                 results.append(token)
             except Exception as e:

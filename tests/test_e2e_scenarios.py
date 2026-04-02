@@ -772,17 +772,6 @@ class TestE2E_Scenario7_Caption_Fallback:
 #  LinkedIn helpers
 # ═══════════════════════════════════════════════════════════════
 
-def _mock_li_auth():
-    """Return a mock that mimics get_li_oauth_manager()."""
-    mock = MagicMock()
-    mock.return_value.get_auth_headers.return_value = {
-        "Authorization": "Bearer li_fake_token",
-        "LinkedIn-Version": "202401",
-        "Content-Type": "application/json",
-        "X-Restli-Protocol-Version": "2.0.0",
-    }
-    return mock
-
 
 def _mock_li_post_success(post_id="urn:li:share:12345"):
     """Create a mock LinkedIn create-post response (201)."""

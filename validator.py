@@ -36,6 +36,8 @@ from config_constants import (
     COL_PUBLISHED_CHANNELS,
     COL_STATUS,
     GBP_POST_TYPE_STANDARD,
+    LI_CAPTION_MAX_LENGTH,
+    LI_URN_PATTERN,
     NETWORK_ALL,
     NETWORK_ALL_THREE,
     NETWORK_BOTH,
@@ -58,7 +60,6 @@ from config_constants import (
     STATUS_READY,
     VALID_NETWORKS,
 )
-
 logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════
@@ -133,7 +134,9 @@ class ErrorCode:
 
     # Channel: LI
     LI_AUTHOR_URN_MISSING = "LI_AUTHOR_URN_MISSING"
+    LI_INVALID_AUTHOR_URN = "LI_INVALID_AUTHOR_URN"
     LI_CAPTION_MISSING = "LI_CAPTION_MISSING"
+    LI_CAPTION_TOO_LONG = "LI_CAPTION_TOO_LONG"
 
     # Network expansion
     NETWORK_ALL_EXPANDED = "NETWORK_ALL_EXPANDED"
@@ -625,6 +628,17 @@ class RowValidator:
                 field=COL_LI_AUTHOR_URN,
                 channel="LI",
             ))
+        elif not LI_URN_PATTERN.match(author_urn):
+            issues.append(ValidationIssue(
+                code=ErrorCode.LI_INVALID_AUTHOR_URN,
+                message=(
+                    f"Invalid author URN format: {author_urn!r}. "
+                    f"Expected urn:li:person:{{id}} or urn:li:organization:{{id}}"
+                ),
+                severity="CHANNEL_BLOCK",
+                field=COL_LI_AUTHOR_URN,
+                channel="LI",
+            ))
 
         # Caption: channel-specific → generic
         caption = n.get(COL_CAPTION_LI) or n.get(COL_CAPTION) or ""
@@ -632,6 +646,17 @@ class RowValidator:
             issues.append(ValidationIssue(
                 code=ErrorCode.LI_CAPTION_MISSING,
                 message="Missing caption for LinkedIn (no caption_li and no generic caption)",
+                severity="CHANNEL_BLOCK",
+                field=COL_CAPTION_LI,
+                channel="LI",
+            ))
+        elif len(caption) > LI_CAPTION_MAX_LENGTH:
+            issues.append(ValidationIssue(
+                code=ErrorCode.LI_CAPTION_TOO_LONG,
+                message=(
+                    f"LinkedIn caption too long — {len(caption)} characters "
+                    f"(maximum {LI_CAPTION_MAX_LENGTH})"
+                ),
                 severity="CHANNEL_BLOCK",
                 field=COL_CAPTION_LI,
                 channel="LI",

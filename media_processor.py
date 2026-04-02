@@ -19,6 +19,7 @@ from config import (
     NETWORK_FB,
     NETWORK_GBP,
     NETWORK_IG,
+    NETWORK_LI,
     NETWORK_ALL,
     POST_TYPE_REELS,
     VIDEO_MIMES,
@@ -50,6 +51,10 @@ IG_REELS_MAX_DURATION = 900         # 15 minutes
 IG_REELS_VIDEO_MIN_RATIO = 0.01    # per Meta API docs
 IG_REELS_VIDEO_MAX_RATIO = 10.0    # per Meta API docs
 
+# ─── LinkedIn limits ─────────────────────────────────────────
+LI_VIDEO_MAX_SIZE = 209_715_200     # 200 MB
+LI_VIDEO_MAX_DURATION = 600         # 10 minutes
+
 
 # ─── Network helpers ─────────────────────────────────────────
 def _targets_ig(network: str) -> bool:
@@ -74,6 +79,14 @@ def _targets_gbp(network: str) -> bool:
         return False  # GBP is opt-in, not assumed by default
     parts = set(network.split("+"))
     return network == NETWORK_ALL or NETWORK_GBP in parts
+
+
+def _targets_li(network: str) -> bool:
+    """Does this network value include LinkedIn?"""
+    if not network:
+        return False  # LI is opt-in, not assumed by default
+    parts = set(network.split("+"))
+    return network == NETWORK_ALL or NETWORK_LI in parts
 
 
 # ─── Exception ────────────────────────────────────────────────
@@ -131,15 +144,18 @@ def validate_media_pre_publish(
     publishes_to_ig = _targets_ig(network)
     publishes_to_fb = _targets_fb(network)
     publishes_to_gbp = _targets_gbp(network)
+    publishes_to_li = _targets_li(network)
 
     if mime_type in IMAGE_MIMES:
         return _validate_image_pre_publish(
             file_bytes, post_type, publishes_to_ig, publishes_to_fb, publishes_to_gbp,
+            publishes_to_li,
         )
 
     if mime_type in VIDEO_MIMES:
         return _validate_video_pre_publish(
             file_bytes, post_type, publishes_to_ig, publishes_to_fb, publishes_to_gbp,
+            publishes_to_li,
         )
 
     return None
@@ -161,6 +177,7 @@ def validate_media_from_metadata(
     publishes_to_ig = _targets_ig(network)
     publishes_to_fb = _targets_fb(network)
     publishes_to_gbp = _targets_gbp(network)
+    publishes_to_li = _targets_li(network)
 
     if mime_type in IMAGE_MIMES:
         img_meta = drive_metadata.get("imageMediaMetadata")
@@ -214,6 +231,9 @@ def validate_media_from_metadata(
         if publishes_to_gbp and file_size > GBP_VIDEO_MAX_SIZE:
             size_mb = file_size / (1024 * 1024)
             return f"סרטון גדול מדי ל-Google Business Profile — {size_mb:.0f}MB (מקסימום 75MB)"
+        if publishes_to_li and file_size > LI_VIDEO_MAX_SIZE:
+            size_mb = file_size / (1024 * 1024)
+            return f"סרטון גדול מדי ל-LinkedIn — {size_mb:.0f}MB (מקסימום 200MB)"
 
         vid_meta = drive_metadata.get("videoMediaMetadata")
         if not vid_meta:
@@ -262,6 +282,14 @@ def validate_media_from_metadata(
                     f"{height}p (מינימום {GBP_VIDEO_MIN_HEIGHT}p)"
                 )
 
+        if publishes_to_li:
+            if duration is not None and duration > LI_VIDEO_MAX_DURATION:
+                mins = duration / 60
+                return (
+                    f"סרטון ארוך מדי ל-LinkedIn — "
+                    f"{mins:.1f} דקות (מקסימום {LI_VIDEO_MAX_DURATION // 60} דקות)"
+                )
+
         return None
 
     return None
@@ -273,12 +301,14 @@ def _validate_image_pre_publish(
     publishes_to_ig: bool,
     publishes_to_fb: bool,
     publishes_to_gbp: bool,
+    publishes_to_li: bool = False,
 ) -> str | None:
     """בדיקת תמונה — יחס גובה-רוחב (IG), רזולוציה (GBP).
 
     Note: Image file size is NOT checked here for any platform because
     images are always compressed to JPEG by normalize_media().  The raw
     bytes may be a large PNG/BMP that compresses well below the limit.
+    LinkedIn's 10MB limit is always satisfied since compression targets 8MB.
     """
     # פתיחת התמונה — נדרש לבדיקות IG ו-GBP
     needs_image_open = publishes_to_ig or publishes_to_gbp
@@ -329,6 +359,7 @@ def _validate_video_pre_publish(
     publishes_to_ig: bool,
     publishes_to_fb: bool,
     publishes_to_gbp: bool,
+    publishes_to_li: bool = False,
 ) -> str | None:
     """בדיקת וידאו — גודל קובץ, משך, יחס גובה-רוחב.
 
@@ -349,6 +380,9 @@ def _validate_video_pre_publish(
     if publishes_to_gbp and file_size > GBP_VIDEO_MAX_SIZE:
         size_mb = file_size / (1024 * 1024)
         return f"סרטון גדול מדי ל-Google Business Profile — {size_mb:.0f}MB (מקסימום 75MB)"
+    if publishes_to_li and file_size > LI_VIDEO_MAX_SIZE:
+        size_mb = file_size / (1024 * 1024)
+        return f"סרטון גדול מדי ל-LinkedIn — {size_mb:.0f}MB (מקסימום 200MB)"
 
     # בדיקת משך ויחס — צריך ffprobe
     tmp_path = None
@@ -408,6 +442,15 @@ def _validate_video_pre_publish(
             return (
                 f"סרטון ברזולוציה נמוכה מדי ל-Google Business Profile — "
                 f"{video_height}p (מינימום {GBP_VIDEO_MIN_HEIGHT}p)"
+            )
+
+    # בדיקות LinkedIn — משך
+    if publishes_to_li:
+        if duration is not None and duration > LI_VIDEO_MAX_DURATION:
+            mins = duration / 60
+            return (
+                f"סרטון ארוך מדי ל-LinkedIn — "
+                f"{mins:.1f} דקות (מקסימום {LI_VIDEO_MAX_DURATION // 60} דקות)"
             )
 
     return None

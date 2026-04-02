@@ -6,6 +6,7 @@ The full config.py re-exports everything from this module, so existing
 code that does `from config import COL_ID` continues to work.
 """
 
+import re
 from zoneinfo import ZoneInfo
 
 # ─── Timezone ────────────────────────────────────────────────
@@ -84,6 +85,10 @@ POST_TYPE_REELS = "REELS"
 GBP_POST_TYPE_STANDARD = "STANDARD"
 GBP_POST_TYPE_EVENT = "EVENT"
 GBP_POST_TYPE_OFFER = "OFFER"
+
+# ─── LinkedIn Limits ───────────────────────────────────────
+LI_CAPTION_MAX_LENGTH = 3000
+LI_URN_PATTERN = re.compile(r"^urn:li:(person|organization):[A-Za-z0-9_-]+$")
 
 # ─── Source Values ──────────────────────────────────────────
 SOURCE_MANUAL = "manual"

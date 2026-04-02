@@ -3,6 +3,7 @@ test_linkedin_auth.py — tests for LinkedInOAuthManager.
 
 Covers:
 - Token refresh flow (success + failure)
+- Direct access token mode (Share on LinkedIn fallback)
 - Token expiry detection and automatic refresh
 - Token caching (avoids redundant refreshes)
 - Thread safety (concurrent access to token)
@@ -103,37 +104,38 @@ class TestTokenRefresh:
         assert url == "https://www.linkedin.com/oauth/v2/accessToken"
 
     @patch("channels.linkedin_auth.requests.post")
-    def test_refresh_failure_raises_oauth_error(self, mock_post):
+    def test_refresh_failure_falls_back_to_direct_mode(self, mock_post):
+        """When refresh fails on first attempt, should fall back to direct token."""
         mock_resp = MagicMock()
         mock_resp.status_code = 400
         mock_resp.text = "invalid_grant"
         mock_post.return_value = mock_resp
 
         mgr = LinkedInOAuthManager("cid", "csecret", "rtoken")
-        with pytest.raises(LinkedInOAuthError, match="Token refresh failed"):
-            mgr.get_access_token()
+        token = mgr.get_access_token()
+        assert token == "rtoken"  # Falls back to using refresh_token as access token
 
     @patch("channels.linkedin_auth.requests.post")
-    def test_refresh_401_raises_oauth_error(self, mock_post):
+    def test_refresh_401_falls_back_to_direct_mode(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 401
         mock_resp.text = "unauthorized_client"
         mock_post.return_value = mock_resp
 
         mgr = LinkedInOAuthManager("cid", "csecret", "rtoken")
-        with pytest.raises(LinkedInOAuthError):
-            mgr.get_access_token()
+        token = mgr.get_access_token()
+        assert token == "rtoken"
 
     @patch("channels.linkedin_auth.requests.post")
-    def test_refresh_500_raises_oauth_error(self, mock_post):
+    def test_refresh_500_falls_back_to_direct_mode(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 500
         mock_resp.text = "Internal Server Error"
         mock_post.return_value = mock_resp
 
         mgr = LinkedInOAuthManager("cid", "csecret", "rtoken")
-        with pytest.raises(LinkedInOAuthError):
-            mgr.get_access_token()
+        token = mgr.get_access_token()
+        assert token == "rtoken"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -343,3 +345,69 @@ class TestSingleton:
             reset_li_oauth_manager()
             m2 = get_li_oauth_manager()
             assert m1 is not m2
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Direct Access Token Mode (Share on LinkedIn)
+# ═══════════════════════════════════════════════════════════════
+
+class TestDirectTokenMode:
+    @patch("channels.linkedin_auth.requests.post")
+    def test_fallback_to_direct_when_refresh_fails(self, mock_post):
+        """When refresh fails, should use LI_REFRESH_TOKEN as direct access token."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.text = "invalid_grant"
+        mock_post.return_value = mock_resp
+
+        mgr = LinkedInOAuthManager("cid", "csecret", "my_access_token_xyz")
+        token = mgr.get_access_token()
+
+        assert token == "my_access_token_xyz"
+
+    @patch("channels.linkedin_auth.requests.post")
+    def test_direct_mode_skips_refresh_on_subsequent_calls(self, mock_post):
+        """Once in direct mode, should not attempt refresh again."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.text = "invalid_grant"
+        mock_post.return_value = mock_resp
+
+        mgr = LinkedInOAuthManager("cid", "csecret", "my_token")
+        mgr.get_access_token()  # First call: tries refresh, falls back
+        mgr.get_access_token()  # Second call: should skip refresh
+
+        # Refresh was only attempted once (on the first call)
+        assert mock_post.call_count == 1
+
+    @patch("channels.linkedin_auth.requests.post")
+    def test_direct_mode_returns_correct_headers(self, mock_post):
+        """Direct mode should still return proper LinkedIn headers."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.text = "invalid_grant"
+        mock_post.return_value = mock_resp
+
+        mgr = LinkedInOAuthManager("cid", "csecret", "direct_token_abc")
+        headers = mgr.get_auth_headers()
+
+        assert headers["Authorization"] == "Bearer direct_token_abc"
+        assert headers["LinkedIn-Version"] == "202401"
+        assert headers["Content-Type"] == "application/json"
+        assert headers["X-Restli-Protocol-Version"] == "2.0.0"
+
+    @patch("channels.linkedin_auth.requests.post")
+    def test_refresh_mode_when_refresh_succeeds(self, mock_post):
+        """When refresh succeeds, should use the refreshed token, not the raw value."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "access_token": "refreshed_token",
+            "expires_in": 3600,
+        }
+        mock_post.return_value = mock_resp
+
+        mgr = LinkedInOAuthManager("cid", "csecret", "my_refresh_token")
+        token = mgr.get_access_token()
+
+        assert token == "refreshed_token"  # Not "my_refresh_token"

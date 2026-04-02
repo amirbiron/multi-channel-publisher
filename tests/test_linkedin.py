@@ -475,15 +475,16 @@ class TestLinkedInOAuthManager:
         assert token == "new_token"
 
     @patch("channels.linkedin_auth.requests.post")
-    def test_refresh_failure_raises(self, mock_post):
+    def test_refresh_failure_falls_back_to_direct(self, mock_post):
+        """When refresh fails, falls back to using refresh_token as access token."""
         mock_resp = MagicMock()
         mock_resp.status_code = 400
         mock_resp.text = "invalid_grant"
         mock_post.return_value = mock_resp
 
         mgr = LinkedInOAuthManager("cid", "csecret", "rtoken")
-        with pytest.raises(LinkedInOAuthError):
-            mgr.get_access_token()
+        token = mgr.get_access_token()
+        assert token == "rtoken"
 
     @patch("channels.linkedin_auth.requests.post")
     def test_get_auth_headers(self, mock_post):

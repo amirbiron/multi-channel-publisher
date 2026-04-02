@@ -37,6 +37,7 @@ from config_constants import (
     COL_STATUS,
     GBP_POST_TYPE_STANDARD,
     LI_CAPTION_MAX_LENGTH,
+    LI_URN_PATTERN,
     NETWORK_ALL,
     NETWORK_ALL_THREE,
     NETWORK_BOTH,
@@ -59,8 +60,6 @@ from config_constants import (
     STATUS_READY,
     VALID_NETWORKS,
 )
-from channels.linkedin import LI_URN_PATTERN
-
 logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════

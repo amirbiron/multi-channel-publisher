@@ -11,21 +11,16 @@ OAuth 2.0 three-legged flow with permission: w_member_social.
 from __future__ import annotations
 
 import logging
-import re
 
 import requests
 
 from channels.base import BaseChannel, PublishResult
 from channels.linkedin_auth import get_li_oauth_manager
-from config_constants import COL_CAPTION_LI, COL_LI_AUTHOR_URN, LI_CAPTION_MAX_LENGTH
+from config_constants import COL_CAPTION_LI, COL_LI_AUTHOR_URN, LI_CAPTION_MAX_LENGTH, LI_URN_PATTERN
 
 logger = logging.getLogger(__name__)
 
 _LI_API_BASE = "https://api.linkedin.com/rest"
-
-# Valid URN patterns for LinkedIn author
-LI_URN_PATTERN = re.compile(r"^urn:li:(person|organization):[A-Za-z0-9_-]+$")
-
 
 class LinkedInChannel(BaseChannel):
     CHANNEL_ID = "LI"

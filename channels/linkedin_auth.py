@@ -1,11 +1,16 @@
 """
 linkedin_auth.py — LinkedIn OAuth 2.0 token management.
 
-Handles access-token acquisition and automatic refresh using a
-long-lived refresh token (stored as env var).  The token is kept
-in-memory and refreshed transparently when it expires.
+Supports two modes:
+1. **Access-token mode** (Share on LinkedIn): LI_REFRESH_TOKEN contains a
+   long-lived access token (~60 days).  No refresh flow — the token is used
+   directly until it expires.
+2. **Refresh-token mode** (Community Management API): LI_REFRESH_TOKEN
+   contains a real refresh token that is exchanged for short-lived access
+   tokens automatically.
 
-LinkedIn three-legged OAuth 2.0 flow with permission: w_member_social.
+The mode is auto-detected: if a refresh attempt fails, the manager falls
+back to using LI_REFRESH_TOKEN as a direct access token.
 """
 
 from __future__ import annotations
@@ -24,13 +29,16 @@ _LI_API_VERSION = "202401"
 # Refresh the token 5 minutes before it actually expires
 _EXPIRY_MARGIN_SECONDS = 300
 
+# Default TTL for direct access tokens (60 days)
+_DIRECT_TOKEN_TTL_SECONDS = 60 * 24 * 3600
+
 
 class LinkedInOAuthManager:
     """
-    Manages LinkedIn OAuth 2.0 access tokens using a refresh token.
+    Manages LinkedIn OAuth 2.0 access tokens.
 
-    LinkedIn's three-legged OAuth flow issues refresh tokens that can be
-    exchanged for short-lived access tokens.
+    Supports both refresh-token flow (Community Management API) and
+    direct access-token mode (Share on LinkedIn).
 
     Usage::
 
@@ -57,6 +65,7 @@ class LinkedInOAuthManager:
         self._access_token: str | None = None
         self._expires_at: float = 0.0  # epoch seconds
         self._lock = threading.Lock()
+        self._direct_mode: bool | None = None  # auto-detected on first use
 
     # -- public API ---------------------------------------------------
 
@@ -69,7 +78,7 @@ class LinkedInOAuthManager:
             # Double-check after acquiring lock
             if self._is_token_valid():
                 return self._access_token  # type: ignore[return-value]
-            self._refresh()
+            self._resolve_token()
             return self._access_token  # type: ignore[return-value]
 
     def get_auth_headers(self) -> dict[str, str]:
@@ -82,9 +91,21 @@ class LinkedInOAuthManager:
         }
 
     def force_refresh(self) -> str:
-        """Force a token refresh regardless of expiry. Returns new token."""
+        """Force a token refresh regardless of expiry. Returns new token.
+
+        In direct-token mode (Share on LinkedIn) this resets the TTL but
+        cannot obtain a genuinely new token — the same access token is
+        returned.  Callers recovering from a 401 should be aware that a
+        second 401 after force_refresh in direct mode means the token has
+        expired and new credentials are needed.
+        """
         with self._lock:
-            self._refresh()
+            if self._direct_mode is True:
+                logger.warning(
+                    "force_refresh called in direct-token mode — "
+                    "cannot obtain a new token; resetting TTL only"
+                )
+            self._resolve_token()
             return self._access_token  # type: ignore[return-value]
 
     # -- internals ----------------------------------------------------
@@ -93,6 +114,44 @@ class LinkedInOAuthManager:
         return (
             self._access_token is not None
             and time.time() < self._expires_at - _EXPIRY_MARGIN_SECONDS
+        )
+
+    def _resolve_token(self) -> None:
+        """Get an access token via refresh flow or direct mode."""
+        # If we already know we're in direct mode, skip the refresh attempt
+        if self._direct_mode is True:
+            self._use_direct_token()
+            return
+
+        # Try refresh flow first (Community Management API)
+        try:
+            self._refresh()
+            self._direct_mode = False
+        except LinkedInOAuthError as exc:
+            # Only fall back to direct mode on auth errors (400/401).
+            # Transient server errors (5xx) should propagate so the
+            # caller can retry later without permanently locking into
+            # the wrong mode.
+            is_auth_error = exc.status_code in (400, 401)
+            if self._direct_mode is None and is_auth_error:
+                logger.info(
+                    "LinkedIn refresh token flow failed (%s) — using "
+                    "LI_REFRESH_TOKEN as direct access token "
+                    "(Share on LinkedIn mode)",
+                    exc.status_code,
+                )
+                self._direct_mode = True
+                self._use_direct_token()
+            else:
+                raise
+
+    def _use_direct_token(self) -> None:
+        """Use LI_REFRESH_TOKEN directly as an access token."""
+        self._access_token = self._refresh_token
+        self._expires_at = time.time() + _DIRECT_TOKEN_TTL_SECONDS
+        logger.info(
+            "LinkedIn using direct access token (valid ~%d days)",
+            _DIRECT_TOKEN_TTL_SECONDS // 86400,
         )
 
     def _refresh(self) -> None:
@@ -117,7 +176,8 @@ class LinkedInOAuthManager:
                 resp.text[:500],
             )
             raise LinkedInOAuthError(
-                f"Token refresh failed ({resp.status_code}): {resp.text[:300]}"
+                f"Token refresh failed ({resp.status_code}): {resp.text[:300]}",
+                status_code=resp.status_code,
             )
 
         data = resp.json()
@@ -129,6 +189,10 @@ class LinkedInOAuthManager:
 
 class LinkedInOAuthError(Exception):
     """Raised when the LinkedIn OAuth token refresh request fails."""
+
+    def __init__(self, message: str, status_code: int = 0) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 # -- module-level singleton (lazy) ------------------------------------

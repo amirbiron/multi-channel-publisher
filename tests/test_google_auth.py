@@ -180,3 +180,79 @@ class TestSingleton:
         reset_oauth_manager()
         mgr2 = get_oauth_manager()
         assert mgr1 is not mgr2
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Thread safety
+# ═══════════════════════════════════════════════════════════════
+
+class TestThreadSafety:
+    @patch("channels.google_auth.requests.post")
+    def test_concurrent_get_access_token_single_refresh(self, mock_post):
+        """Multiple threads calling get_access_token() should only trigger one refresh."""
+        import threading
+
+        call_count = 0
+        original_return = _mock_token_response("concurrent_tok", 3600)
+
+        def slow_post(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            time.sleep(0.05)  # simulate network latency
+            return original_return
+
+        mock_post.side_effect = slow_post
+
+        mgr = GoogleOAuthManager("cid", "csec", "rtok")
+        results = [None] * 5
+        errors = []
+
+        def get_token(idx):
+            try:
+                results[idx] = mgr.get_access_token()
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=get_token, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert not errors, f"Threads raised errors: {errors}"
+        # All threads should get the same token
+        assert all(r == "concurrent_tok" for r in results)
+        # Only one refresh call should have been made (double-check locking)
+        assert call_count == 1
+
+    @patch("channels.google_auth.requests.post")
+    def test_concurrent_force_refresh(self, mock_post):
+        """Concurrent force_refresh() calls should not corrupt internal state."""
+        import threading
+
+        counter = {"value": 0}
+
+        def counted_post(*args, **kwargs):
+            counter["value"] += 1
+            return _mock_token_response(f"tok_{counter['value']}", 3600)
+
+        mock_post.side_effect = counted_post
+
+        mgr = GoogleOAuthManager("cid", "csec", "rtok")
+        errors = []
+
+        def force(idx):
+            try:
+                mgr.force_refresh()
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=force, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert not errors
+        # Token should be valid (not None or empty)
+        assert mgr.get_access_token() is not None

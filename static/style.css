@@ -530,7 +530,8 @@ body {
 }
 
 /* ─── GBP Fields Section ─────────────────────────────────────── */
-.gbp-fields-section {
+.gbp-fields-section,
+.li-fields-section {
   border-top: 1px solid var(--color-border);
   padding-top: var(--space-md);
   margin-top: var(--space-sm);

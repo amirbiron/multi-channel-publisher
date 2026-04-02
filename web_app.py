@@ -30,6 +30,8 @@ from config_constants import (
     COL_CAPTION_IG,
     COL_CAPTION_FB,
     COL_CAPTION_GBP,
+    COL_CAPTION_LI,
+    COL_LI_AUTHOR_URN,
     COL_GBP_POST_TYPE,
     COL_CTA_TYPE,
     COL_CTA_URL,
@@ -53,6 +55,7 @@ from config_constants import (
     NETWORK_IG,
     NETWORK_FB,
     NETWORK_GBP,
+    NETWORK_LI,
     NETWORK_BOTH,
     NETWORK_IG_GBP,
     NETWORK_FB_GBP,
@@ -359,6 +362,21 @@ def _validate_gbp_fields(data: dict) -> str | None:
     return None
 
 
+def _network_includes_li(network: str) -> bool:
+    """Check whether a network string includes LI (handles 'ALL' too)."""
+    return network == NETWORK_ALL or NETWORK_LI in network.split("+")
+
+
+def _validate_li_fields(data: dict) -> str | None:
+    """Return an error message if LinkedIn fields are invalid, or None if OK."""
+    network = data.get(COL_NETWORK, "")
+    if _network_includes_li(network):
+        author_urn = data.get(COL_LI_AUTHOR_URN, "").strip()
+        if not author_urn:
+            return "li_author_urn is required when LinkedIn is selected"
+    return None
+
+
 # ─── Background media validation ────────────────────────────
 _media_validation_pool = ThreadPoolExecutor(max_workers=2)
 
@@ -473,6 +491,11 @@ def api_create_post():
         if err:
             return jsonify({"error": err}), 400
 
+        # Validate: LinkedIn requires li_author_urn
+        err = _validate_li_fields(data)
+        if err:
+            return jsonify({"error": err}), 400
+
         header, rows = sheets_read_all_rows()
 
         if not header:
@@ -493,7 +516,8 @@ def api_create_post():
         allowed_fields = {
             COL_NETWORK, COL_POST_TYPE, COL_PUBLISH_AT,
             COL_CAPTION, COL_CAPTION_IG, COL_CAPTION_FB,
-            COL_CAPTION_GBP, COL_GBP_POST_TYPE,
+            COL_CAPTION_GBP, COL_CAPTION_LI, COL_LI_AUTHOR_URN,
+            COL_GBP_POST_TYPE,
             COL_GOOGLE_LOCATION_ID, COL_CTA_TYPE, COL_CTA_URL,
             COL_DRIVE_FILE_ID,
         }
@@ -568,6 +592,11 @@ def api_update_post(row_number):
         if err:
             return jsonify({"error": err}), 400
 
+        # Validate: LinkedIn requires li_author_urn
+        err = _validate_li_fields(data)
+        if err:
+            return jsonify({"error": err}), 400
+
         header, rows = sheets_read_all_rows()
 
         if not header:
@@ -582,7 +611,8 @@ def api_update_post(row_number):
         allowed_fields = {
             COL_NETWORK, COL_POST_TYPE, COL_PUBLISH_AT,
             COL_CAPTION, COL_CAPTION_IG, COL_CAPTION_FB,
-            COL_CAPTION_GBP, COL_GBP_POST_TYPE,
+            COL_CAPTION_GBP, COL_CAPTION_LI, COL_LI_AUTHOR_URN,
+            COL_GBP_POST_TYPE,
             COL_GOOGLE_LOCATION_ID, COL_CTA_TYPE, COL_CTA_URL,
             COL_DRIVE_FILE_ID,
         }

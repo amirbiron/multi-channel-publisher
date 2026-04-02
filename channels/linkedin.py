@@ -16,20 +16,12 @@ import re
 import requests
 
 from channels.base import BaseChannel, PublishResult
-from channels.linkedin_auth import (
-    LinkedInOAuthManager,
-    LinkedInOAuthError,
-    get_li_oauth_manager,
-    reset_li_oauth_manager,
-)
+from channels.linkedin_auth import get_li_oauth_manager
 from config_constants import COL_CAPTION_LI, COL_LI_AUTHOR_URN
 
 logger = logging.getLogger(__name__)
 
 _LI_API_BASE = "https://api.linkedin.com/rest"
-
-# LinkedIn API version header (required by Community Management API)
-_LI_API_VERSION = "202401"
 
 # LinkedIn caption maximum length
 _MAX_CAPTION_LENGTH = 3000
@@ -280,8 +272,6 @@ class LinkedInChannel(BaseChannel):
                 return "validation_error"
             if status == 429:
                 return "rate_limit"
-            if 500 <= status < 600:
-                return f"http_{status}"
             return f"http_{status}"
 
         return "api_error"

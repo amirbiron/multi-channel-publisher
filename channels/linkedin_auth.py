@@ -18,6 +18,9 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# LinkedIn API version header (required by Community Management API)
+_LI_API_VERSION = "202401"
+
 # Refresh the token 5 minutes before it actually expires
 _EXPIRY_MARGIN_SECONDS = 300
 
@@ -73,7 +76,7 @@ class LinkedInOAuthManager:
         """Return headers required for LinkedIn REST API calls."""
         return {
             "Authorization": f"Bearer {self.get_access_token()}",
-            "LinkedIn-Version": "202401",
+            "LinkedIn-Version": _LI_API_VERSION,
             "Content-Type": "application/json",
             "X-Restli-Protocol-Version": "2.0.0",
         }

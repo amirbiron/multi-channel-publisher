@@ -28,7 +28,7 @@ let selectedDriveFiles = [];   // [{id, name}] for multi-select (carousel)
 let filters = { status: '', network: '', dateFrom: '', dateTo: '', search: '' };
 
 // Character limits
-const CHAR_LIMITS = { ig: 2200, fb: 63206, gbp: 1500 };
+const CHAR_LIMITS = { ig: 2200, fb: 63206, gbp: 1500, li: 3000 };
 
 // Polling state
 let pollTimer = null;

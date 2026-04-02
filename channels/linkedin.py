@@ -101,11 +101,15 @@ class LinkedInChannel(BaseChannel):
                 "author": author_urn,
                 "lifecycleState": "PUBLISHED",
                 "visibility": "PUBLIC",
-                "commentary": caption,
                 "distribution": {
                     "feedDistribution": "MAIN_FEED",
                 },
             }
+
+            # Only include commentary when non-empty (LinkedIn API treats
+            # empty string differently from omitting the field)
+            if caption:
+                body["commentary"] = caption
 
             # Attach media if uploaded
             if media_urn:
@@ -212,10 +216,18 @@ class LinkedInChannel(BaseChannel):
         2. Upload binary to the provided uploadUrl (single chunk for small files)
         3. Return the video URN for use in the post
         """
-        # Step 1: Download video first to know the file size
-        vid_data = requests.get(video_url, timeout=120)
-        vid_data.raise_for_status()
-        file_size = len(vid_data.content)
+        # Step 1: Get file size via HEAD request (avoids loading into memory)
+        head_resp = requests.head(video_url, timeout=30, allow_redirects=True)
+        head_resp.raise_for_status()
+        file_size = int(head_resp.headers.get("Content-Length", 0))
+
+        if not file_size:
+            # Fallback: download to get size if HEAD didn't return Content-Length
+            vid_data = requests.get(video_url, timeout=120)
+            vid_data.raise_for_status()
+            file_size = len(vid_data.content)
+        else:
+            vid_data = None  # will download later per chunk
 
         # Step 2: Initialize upload
         init_resp = requests.post(
@@ -235,7 +247,12 @@ class LinkedInChannel(BaseChannel):
         video_urn = init_data["value"]["video"]
         upload_instructions = init_data["value"]["uploadInstructions"]
 
-        # Step 3: Upload chunks (usually single chunk for small files)
+        # Step 3: Download video content if not already fetched
+        if vid_data is None:
+            vid_data = requests.get(video_url, timeout=120)
+            vid_data.raise_for_status()
+
+        # Step 4: Upload chunks (usually single chunk for small files)
         upload_headers = {
             "Authorization": headers["Authorization"],
         }

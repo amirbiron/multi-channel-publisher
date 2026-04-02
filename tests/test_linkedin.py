@@ -251,10 +251,11 @@ class TestPublishWithImage:
 
 class TestPublishWithVideo:
     @patch("channels.linkedin.get_li_oauth_manager")
+    @patch("channels.linkedin.requests.head")
     @patch("channels.linkedin.requests.get")
     @patch("channels.linkedin.requests.put")
     @patch("channels.linkedin.requests.post")
-    def test_text_video_upload_flow(self, mock_post, mock_put, mock_get, mock_auth, channel):
+    def test_text_video_upload_flow(self, mock_post, mock_put, mock_get, mock_head, mock_auth, channel):
         mock_auth.return_value.get_auth_headers.return_value = {
             "Authorization": "Bearer fake",
             "LinkedIn-Version": "202401",
@@ -262,9 +263,17 @@ class TestPublishWithVideo:
             "X-Restli-Protocol-Version": "2.0.0",
         }
 
+        video_content = b"fake-video-bytes-content"
+
+        # Mock HEAD request for file size
+        head_resp = MagicMock()
+        head_resp.headers = {"Content-Length": str(len(video_content))}
+        head_resp.raise_for_status = MagicMock()
+        mock_head.return_value = head_resp
+
         # Mock downloading the video from cloud storage
         vid_resp = MagicMock()
-        vid_resp.content = b"fake-video-bytes-content"
+        vid_resp.content = video_content
         vid_resp.raise_for_status = MagicMock()
         mock_get.return_value = vid_resp
 
@@ -278,7 +287,7 @@ class TestPublishWithVideo:
                     {
                         "uploadUrl": "https://www.linkedin.com/dms-uploads/video789",
                         "firstByte": 0,
-                        "lastByte": len(vid_resp.content) - 1,
+                        "lastByte": len(video_content) - 1,
                     }
                 ],
             }
@@ -311,11 +320,14 @@ class TestPublishWithVideo:
         assert result.success is True
         assert result.platform_post_id == "urn:li:share:77777"
 
+        # Verify HEAD request was made to get file size
+        mock_head.assert_called_once()
+
         # Verify initializeUpload was called with file size
         init_call = mock_post.call_args_list[0]
         assert "videos?action=initializeUpload" in init_call.args[0]
         init_body = init_call.kwargs.get("json") or init_call[1].get("json")
-        assert init_body["initializeUploadRequest"]["fileSizeBytes"] == len(vid_resp.content)
+        assert init_body["initializeUploadRequest"]["fileSizeBytes"] == len(video_content)
 
         # Verify video was uploaded via PUT
         mock_put.assert_called_once()

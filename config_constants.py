@@ -85,6 +85,9 @@ GBP_POST_TYPE_STANDARD = "STANDARD"
 GBP_POST_TYPE_EVENT = "EVENT"
 GBP_POST_TYPE_OFFER = "OFFER"
 
+# ─── LinkedIn Limits ───────────────────────────────────────
+LI_CAPTION_MAX_LENGTH = 3000
+
 # ─── Source Values ──────────────────────────────────────────
 SOURCE_MANUAL = "manual"
 SOURCE_AUTO = "auto"

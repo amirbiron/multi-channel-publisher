@@ -14,6 +14,7 @@ The validator returns a ValidationReport that tells the publisher:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
@@ -133,7 +134,9 @@ class ErrorCode:
 
     # Channel: LI
     LI_AUTHOR_URN_MISSING = "LI_AUTHOR_URN_MISSING"
+    LI_INVALID_AUTHOR_URN = "LI_INVALID_AUTHOR_URN"
     LI_CAPTION_MISSING = "LI_CAPTION_MISSING"
+    LI_CAPTION_TOO_LONG = "LI_CAPTION_TOO_LONG"
 
     # Network expansion
     NETWORK_ALL_EXPANDED = "NETWORK_ALL_EXPANDED"
@@ -612,6 +615,9 @@ class RowValidator:
         blocked = any(i.severity == "CHANNEL_BLOCK" for i in issues)
         return ChannelValidationResult(channel="GBP", approved=not blocked, issues=issues)
 
+    _LI_URN_PATTERN = re.compile(r"^urn:li:(person|organization):[A-Za-z0-9_-]+$")
+    _LI_CAPTION_MAX_LENGTH = 3000
+
     def _validate_li(self, n: dict) -> ChannelValidationResult:
         issues: list[ValidationIssue] = []
 
@@ -625,6 +631,17 @@ class RowValidator:
                 field=COL_LI_AUTHOR_URN,
                 channel="LI",
             ))
+        elif not self._LI_URN_PATTERN.match(author_urn):
+            issues.append(ValidationIssue(
+                code=ErrorCode.LI_INVALID_AUTHOR_URN,
+                message=(
+                    f"Invalid author URN format: {author_urn!r}. "
+                    f"Expected urn:li:person:{{id}} or urn:li:organization:{{id}}"
+                ),
+                severity="CHANNEL_BLOCK",
+                field=COL_LI_AUTHOR_URN,
+                channel="LI",
+            ))
 
         # Caption: channel-specific → generic
         caption = n.get(COL_CAPTION_LI) or n.get(COL_CAPTION) or ""
@@ -632,6 +649,17 @@ class RowValidator:
             issues.append(ValidationIssue(
                 code=ErrorCode.LI_CAPTION_MISSING,
                 message="Missing caption for LinkedIn (no caption_li and no generic caption)",
+                severity="CHANNEL_BLOCK",
+                field=COL_CAPTION_LI,
+                channel="LI",
+            ))
+        elif len(caption) > self._LI_CAPTION_MAX_LENGTH:
+            issues.append(ValidationIssue(
+                code=ErrorCode.LI_CAPTION_TOO_LONG,
+                message=(
+                    f"LinkedIn caption too long — {len(caption)} characters "
+                    f"(maximum {self._LI_CAPTION_MAX_LENGTH})"
+                ),
                 severity="CHANNEL_BLOCK",
                 field=COL_CAPTION_LI,
                 channel="LI",

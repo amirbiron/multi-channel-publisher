@@ -7,6 +7,7 @@ from channels.registry import ChannelRegistry
 from channels.meta_instagram import InstagramChannel
 from channels.meta_facebook import FacebookChannel
 from channels.google_business import GoogleBusinessChannel
+from channels.linkedin import LinkedInChannel
 
 __all__ = [
     "BaseChannel",
@@ -15,11 +16,12 @@ __all__ = [
     "InstagramChannel",
     "FacebookChannel",
     "GoogleBusinessChannel",
+    "LinkedInChannel",
 ]
 
-# Feature flag for GBP rollout — set GBP_ENABLED=true to activate
-# Defaults to OFF for safe phased rollout (see DEPLOYMENT_CHECKLIST.md)
+# Feature flags — set to "true" to activate
 GBP_ENABLED = os.environ.get("GBP_ENABLED", "false").lower() in ("true", "1", "yes")
+LI_ENABLED = os.environ.get("LI_ENABLED", "false").lower() in ("true", "1", "yes")
 
 
 def create_default_registry() -> ChannelRegistry:
@@ -29,4 +31,6 @@ def create_default_registry() -> ChannelRegistry:
     registry.register(FacebookChannel())
     if GBP_ENABLED:
         registry.register(GoogleBusinessChannel())
+    if LI_ENABLED:
+        registry.register(LinkedInChannel())
     return registry

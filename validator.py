@@ -22,12 +22,14 @@ from config_constants import (
     COL_CAPTION_FB,
     COL_CAPTION_GBP,
     COL_CAPTION_IG,
+    COL_CAPTION_LI,
     COL_CTA_TYPE,
     COL_CTA_URL,
     COL_DRIVE_FILE_ID,
     COL_FAILED_CHANNELS,
     COL_GBP_POST_TYPE,
     COL_GOOGLE_LOCATION_ID,
+    COL_LI_AUTHOR_URN,
     COL_NETWORK,
     COL_POST_TYPE,
     COL_PUBLISH_AT,
@@ -39,9 +41,17 @@ from config_constants import (
     NETWORK_BOTH,
     NETWORK_FB,
     NETWORK_FB_GBP,
+    NETWORK_FB_GBP_LI,
+    NETWORK_FB_LI,
     NETWORK_GBP,
+    NETWORK_GBP_LI,
     NETWORK_IG,
+    NETWORK_IG_FB_GBP_LI,
+    NETWORK_IG_FB_LI,
     NETWORK_IG_GBP,
+    NETWORK_IG_GBP_LI,
+    NETWORK_IG_LI,
+    NETWORK_LI,
     POST_TYPE_FEED,
     POST_TYPE_REELS,
     STATUS_PROCESSING,
@@ -56,18 +66,26 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════
 
 Severity = Literal["ROW_BLOCK", "CHANNEL_BLOCK", "WARNING"]
-ChannelId = Literal["IG", "FB", "GBP"]
+ChannelId = Literal["IG", "FB", "GBP", "LI"]
 
 # Map network value → list of channel IDs
 _NETWORK_TO_CHANNELS: dict[str, list[str]] = {
     NETWORK_IG: [NETWORK_IG],
     NETWORK_FB: [NETWORK_FB],
     NETWORK_GBP: [NETWORK_GBP],
+    NETWORK_LI: [NETWORK_LI],
     NETWORK_BOTH: [NETWORK_IG, NETWORK_FB],
     NETWORK_IG_GBP: [NETWORK_IG, NETWORK_GBP],
     NETWORK_FB_GBP: [NETWORK_FB, NETWORK_GBP],
+    NETWORK_IG_LI: [NETWORK_IG, NETWORK_LI],
+    NETWORK_FB_LI: [NETWORK_FB, NETWORK_LI],
+    NETWORK_GBP_LI: [NETWORK_GBP, NETWORK_LI],
     NETWORK_ALL_THREE: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
-    NETWORK_ALL: [NETWORK_IG, NETWORK_FB, NETWORK_GBP],
+    NETWORK_IG_FB_LI: [NETWORK_IG, NETWORK_FB, NETWORK_LI],
+    NETWORK_IG_GBP_LI: [NETWORK_IG, NETWORK_GBP, NETWORK_LI],
+    NETWORK_FB_GBP_LI: [NETWORK_FB, NETWORK_GBP, NETWORK_LI],
+    NETWORK_IG_FB_GBP_LI: [NETWORK_IG, NETWORK_FB, NETWORK_GBP, NETWORK_LI],
+    NETWORK_ALL: [NETWORK_IG, NETWORK_FB, NETWORK_GBP, NETWORK_LI],
 }
 
 # GBP post type aliases — normalized before validation
@@ -112,6 +130,10 @@ class ErrorCode:
     # Channel: FB
     FB_MEDIA_MISSING = "FB_MEDIA_MISSING"
     FB_CAPTION_MISSING = "FB_CAPTION_MISSING"
+
+    # Channel: LI
+    LI_AUTHOR_URN_MISSING = "LI_AUTHOR_URN_MISSING"
+    LI_CAPTION_MISSING = "LI_CAPTION_MISSING"
 
     # Network expansion
     NETWORK_ALL_EXPANDED = "NETWORK_ALL_EXPANDED"
@@ -237,9 +259,9 @@ class RowValidator:
             out[key] = val.strip() if isinstance(val, str) else val
 
         # Normalize empty strings to None for optional fields
-        for key in (COL_CAPTION_GBP, COL_CAPTION_IG, COL_CAPTION_FB,
+        for key in (COL_CAPTION_GBP, COL_CAPTION_IG, COL_CAPTION_FB, COL_CAPTION_LI,
                      COL_CTA_TYPE, COL_CTA_URL, COL_GBP_POST_TYPE,
-                     COL_GOOGLE_LOCATION_ID):
+                     COL_GOOGLE_LOCATION_ID, COL_LI_AUTHOR_URN):
             if out.get(key) == "":
                 out[key] = None
 
@@ -335,6 +357,7 @@ class RowValidator:
             COL_CAPTION_IG: "IG",
             COL_CAPTION_FB: "FB",
             COL_CAPTION_GBP: "GBP",
+            COL_CAPTION_LI: "LI",
         }
         for cap_col, ch_id in _caption_to_channel.items():
             if out.get(cap_col) is None:
@@ -425,7 +448,7 @@ class RowValidator:
         # Drive file IDs (media)
         # GBP supports text-only posts (no media required).
         # Only block the row if ALL target channels require media.
-        _CHANNELS_SUPPORTING_TEXT_ONLY = {"GBP"}
+        _CHANNELS_SUPPORTING_TEXT_ONLY = {"GBP", "LI"}
         drive_ids: list[str] = normalized.get("_drive_file_ids", [])
         if not drive_ids:
             all_need_media = all(
@@ -475,6 +498,7 @@ class RowValidator:
             "IG": self._validate_ig,
             "FB": self._validate_fb,
             "GBP": self._validate_gbp,
+            "LI": self._validate_li,
         }
         validator_fn = dispatch.get(channel_id)
         if validator_fn is None:
@@ -588,6 +612,34 @@ class RowValidator:
         blocked = any(i.severity == "CHANNEL_BLOCK" for i in issues)
         return ChannelValidationResult(channel="GBP", approved=not blocked, issues=issues)
 
+    def _validate_li(self, n: dict) -> ChannelValidationResult:
+        issues: list[ValidationIssue] = []
+
+        # Author URN is required
+        author_urn = n.get(COL_LI_AUTHOR_URN)
+        if not author_urn:
+            issues.append(ValidationIssue(
+                code=ErrorCode.LI_AUTHOR_URN_MISSING,
+                message="Missing li_author_urn (required for LinkedIn)",
+                severity="CHANNEL_BLOCK",
+                field=COL_LI_AUTHOR_URN,
+                channel="LI",
+            ))
+
+        # Caption: channel-specific → generic
+        caption = n.get(COL_CAPTION_LI) or n.get(COL_CAPTION) or ""
+        if not caption:
+            issues.append(ValidationIssue(
+                code=ErrorCode.LI_CAPTION_MISSING,
+                message="Missing caption for LinkedIn (no caption_li and no generic caption)",
+                severity="CHANNEL_BLOCK",
+                field=COL_CAPTION_LI,
+                channel="LI",
+            ))
+
+        blocked = any(i.severity == "CHANNEL_BLOCK" for i in issues)
+        return ChannelValidationResult(channel="LI", approved=not blocked, issues=issues)
+
     # ─── Phase 4: Aggregation ────────────────────────────────
 
     def _aggregate(
@@ -654,6 +706,8 @@ class RowValidator:
             COL_CAPTION_IG: normalized.get(COL_CAPTION_IG) or "",
             COL_CAPTION_FB: normalized.get(COL_CAPTION_FB) or "",
             COL_CAPTION_GBP: normalized.get(COL_CAPTION_GBP) or "",
+            COL_CAPTION_LI: normalized.get(COL_CAPTION_LI) or "",
+            COL_LI_AUTHOR_URN: normalized.get(COL_LI_AUTHOR_URN) or "",
             COL_GOOGLE_LOCATION_ID: normalized.get(COL_GOOGLE_LOCATION_ID) or "",
             COL_GBP_POST_TYPE: normalized.get(COL_GBP_POST_TYPE) or "",
             COL_CTA_TYPE: normalized.get(COL_CTA_TYPE) or "",

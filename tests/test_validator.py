@@ -191,11 +191,33 @@ class TestGlobalValidation:
         assert report.row_blocked
         assert any(i.code == ErrorCode.ROW_PUBLISH_AT_MISSING for i in report.issues)
 
-    def test_missing_drive_file_id_blocks_row(self, validator):
-        row = _make_row(**{COL_DRIVE_FILE_ID: ""})
+    def test_missing_drive_file_id_blocks_row_for_ig_fb(self, validator):
+        """IG+FB without media → row blocked (both channels require media)."""
+        row = _make_row(**{COL_DRIVE_FILE_ID: "", COL_NETWORK: "IG+FB"})
         report = validator.validate(row)
         assert report.row_blocked
         assert any(i.code == ErrorCode.ROW_MEDIA_MISSING for i in report.issues)
+
+    def test_missing_drive_file_id_does_not_block_gbp_only(self, validator):
+        """GBP-only without media → NOT blocked (GBP supports text-only)."""
+        row = _make_gbp_row(**{COL_DRIVE_FILE_ID: ""})
+        report = validator.validate(row)
+        assert not report.row_blocked
+        assert "GBP" in report.approved_channels
+
+    def test_missing_drive_file_id_blocks_ig_not_gbp(self, validator):
+        """IG+GBP without media → IG blocked (needs media), GBP approved (text-only ok)."""
+        row = _make_gbp_row(**{
+            COL_DRIVE_FILE_ID: "",
+            COL_NETWORK: "IG+GBP",
+            COL_CAPTION_IG: "IG text",
+        })
+        report = validator.validate(row)
+        assert not report.row_blocked
+        assert "GBP" in report.approved_channels
+        assert "IG" in report.blocked_channels
+        ig_issues = report.blocked_channels["IG"]
+        assert any(i.code == ErrorCode.IG_MEDIA_MISSING for i in ig_issues)
 
     def test_carousel_reels_blocks_row(self, validator):
         row = _make_row(**{

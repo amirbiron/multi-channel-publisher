@@ -104,6 +104,7 @@ class TestValidation:
         }
         errors = channel.validate(data)
         assert any("video/mp4" in e for e in errors)
+        assert any("does not support video" in e.lower() for e in errors)
 
 
 # ═══════════════════════════════════════════════════════════════

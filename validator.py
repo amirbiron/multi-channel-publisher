@@ -423,14 +423,26 @@ class RowValidator:
                 ))
 
         # Drive file IDs (media)
+        # GBP supports text-only posts (no media required).
+        # Only block the row if ALL target channels require media.
+        _CHANNELS_SUPPORTING_TEXT_ONLY = {"GBP"}
         drive_ids: list[str] = normalized.get("_drive_file_ids", [])
         if not drive_ids:
-            issues.append(ValidationIssue(
-                code=ErrorCode.ROW_MEDIA_MISSING,
-                message="Missing drive_file_id",
-                severity="ROW_BLOCK",
-                field=COL_DRIVE_FILE_ID,
-            ))
+            all_need_media = all(
+                ch not in _CHANNELS_SUPPORTING_TEXT_ONLY
+                for ch in target_channels
+            )
+            if all_need_media:
+                issues.append(ValidationIssue(
+                    code=ErrorCode.ROW_MEDIA_MISSING,
+                    message="Missing drive_file_id",
+                    severity="ROW_BLOCK",
+                    field=COL_DRIVE_FILE_ID,
+                ))
+            else:
+                # Some channels support text-only — media check deferred
+                # to channel-level validation (IG/FB will be blocked there).
+                pass
 
         # Carousel constraints
         is_carousel = len(drive_ids) > 1

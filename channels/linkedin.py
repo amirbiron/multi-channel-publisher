@@ -17,17 +17,14 @@ import requests
 
 from channels.base import BaseChannel, PublishResult
 from channels.linkedin_auth import get_li_oauth_manager
-from config_constants import COL_CAPTION_LI, COL_LI_AUTHOR_URN
+from config_constants import COL_CAPTION_LI, COL_LI_AUTHOR_URN, LI_CAPTION_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
 
 _LI_API_BASE = "https://api.linkedin.com/rest"
 
-# LinkedIn caption maximum length
-_MAX_CAPTION_LENGTH = 3000
-
 # Valid URN patterns for LinkedIn author
-_URN_PATTERN = re.compile(r"^urn:li:(person|organization):[A-Za-z0-9_-]+$")
+LI_URN_PATTERN = re.compile(r"^urn:li:(person|organization):[A-Za-z0-9_-]+$")
 
 
 class LinkedInChannel(BaseChannel):
@@ -46,7 +43,7 @@ class LinkedInChannel(BaseChannel):
         author_urn = post_data.get(COL_LI_AUTHOR_URN, "")
         if not author_urn:
             errors.append("Missing li_author_urn (required for LinkedIn)")
-        elif not _URN_PATTERN.match(author_urn):
+        elif not LI_URN_PATTERN.match(author_urn):
             errors.append(
                 f"Invalid li_author_urn format: '{author_urn}'. "
                 f"Expected urn:li:person:{{id}} or urn:li:organization:{{id}}"
@@ -80,10 +77,10 @@ class LinkedInChannel(BaseChannel):
                     )
 
         # Caption length check
-        if caption and len(caption) > _MAX_CAPTION_LENGTH:
+        if caption and len(caption) > LI_CAPTION_MAX_LENGTH:
             errors.append(
                 f"LinkedIn caption too long ({len(caption)} chars). "
-                f"Maximum is {_MAX_CAPTION_LENGTH} characters."
+                f"Maximum is {LI_CAPTION_MAX_LENGTH} characters."
             )
 
         return errors

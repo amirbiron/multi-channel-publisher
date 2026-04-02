@@ -14,7 +14,6 @@ The validator returns a ValidationReport that tells the publisher:
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
@@ -60,6 +59,7 @@ from config_constants import (
     STATUS_READY,
     VALID_NETWORKS,
 )
+from channels.linkedin import LI_URN_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -616,8 +616,6 @@ class RowValidator:
         blocked = any(i.severity == "CHANNEL_BLOCK" for i in issues)
         return ChannelValidationResult(channel="GBP", approved=not blocked, issues=issues)
 
-    _LI_URN_PATTERN = re.compile(r"^urn:li:(person|organization):[A-Za-z0-9_-]+$")
-
     def _validate_li(self, n: dict) -> ChannelValidationResult:
         issues: list[ValidationIssue] = []
 
@@ -631,7 +629,7 @@ class RowValidator:
                 field=COL_LI_AUTHOR_URN,
                 channel="LI",
             ))
-        elif not self._LI_URN_PATTERN.match(author_urn):
+        elif not LI_URN_PATTERN.match(author_urn):
             issues.append(ValidationIssue(
                 code=ErrorCode.LI_INVALID_AUTHOR_URN,
                 message=(

@@ -52,7 +52,6 @@ IG_REELS_VIDEO_MIN_RATIO = 0.01    # per Meta API docs
 IG_REELS_VIDEO_MAX_RATIO = 10.0    # per Meta API docs
 
 # ─── LinkedIn limits ─────────────────────────────────────────
-LI_IMAGE_MAX_SIZE = 10_485_760      # 10 MB
 LI_VIDEO_MAX_SIZE = 209_715_200     # 200 MB
 LI_VIDEO_MAX_DURATION = 600         # 10 minutes
 
@@ -181,11 +180,6 @@ def validate_media_from_metadata(
     publishes_to_li = _targets_li(network)
 
     if mime_type in IMAGE_MIMES:
-        # LinkedIn image size check (from Drive metadata)
-        if publishes_to_li and file_size > LI_IMAGE_MAX_SIZE:
-            size_mb = file_size / (1024 * 1024)
-            return f"תמונה גדולה מדי ל-LinkedIn — {size_mb:.1f}MB (מקסימום 10MB)"
-
         img_meta = drive_metadata.get("imageMediaMetadata")
         if not img_meta:
             return None  # Drive didn't provide image metadata — skip
@@ -309,18 +303,13 @@ def _validate_image_pre_publish(
     publishes_to_gbp: bool,
     publishes_to_li: bool = False,
 ) -> str | None:
-    """בדיקת תמונה — יחס גובה-רוחב (IG), רזולוציה (GBP), גודל (LI).
+    """בדיקת תמונה — יחס גובה-רוחב (IG), רזולוציה (GBP).
 
-    Note: Image file size is NOT checked here for IG/FB/GBP because
+    Note: Image file size is NOT checked here for any platform because
     images are always compressed to JPEG by normalize_media().  The raw
     bytes may be a large PNG/BMP that compresses well below the limit.
-    LinkedIn has a 10MB limit that is checked on raw bytes as a best-effort
-    early filter.
+    LinkedIn's 10MB limit is always satisfied since compression targets 8MB.
     """
-    # LinkedIn — image size check (best-effort pre-compression)
-    if publishes_to_li and len(file_bytes) > LI_IMAGE_MAX_SIZE:
-        size_mb = len(file_bytes) / (1024 * 1024)
-        return f"תמונה גדולה מדי ל-LinkedIn — {size_mb:.1f}MB (מקסימום 10MB)"
     # פתיחת התמונה — נדרש לבדיקות IG ו-GBP
     needs_image_open = publishes_to_ig or publishes_to_gbp
     if needs_image_open:

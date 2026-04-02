@@ -91,8 +91,20 @@ class LinkedInOAuthManager:
         }
 
     def force_refresh(self) -> str:
-        """Force a token refresh regardless of expiry. Returns new token."""
+        """Force a token refresh regardless of expiry. Returns new token.
+
+        In direct-token mode (Share on LinkedIn) this resets the TTL but
+        cannot obtain a genuinely new token — the same access token is
+        returned.  Callers recovering from a 401 should be aware that a
+        second 401 after force_refresh in direct mode means the token has
+        expired and new credentials are needed.
+        """
         with self._lock:
+            if self._direct_mode is True:
+                logger.warning(
+                    "force_refresh called in direct-token mode — "
+                    "cannot obtain a new token; resetting TTL only"
+                )
             self._resolve_token()
             return self._access_token  # type: ignore[return-value]
 

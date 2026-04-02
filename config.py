@@ -56,6 +56,11 @@ GBP_OAUTH_CLIENT_ID = os.environ.get("GBP_OAUTH_CLIENT_ID", "")
 GBP_OAUTH_CLIENT_SECRET = os.environ.get("GBP_OAUTH_CLIENT_SECRET", "")
 GBP_REFRESH_TOKEN = os.environ.get("GBP_REFRESH_TOKEN", "")
 
+# ─── LinkedIn — OAuth 2.0 ────────────────────────────────
+LI_OAUTH_CLIENT_ID = os.environ.get("LI_OAUTH_CLIENT_ID", "")
+LI_OAUTH_CLIENT_SECRET = os.environ.get("LI_OAUTH_CLIENT_SECRET", "")
+LI_REFRESH_TOKEN = os.environ.get("LI_REFRESH_TOKEN", "")
+
 # ─── Retry ────────────────────────────────────────────────
 PUBLISH_MAX_RETRIES = int(os.environ.get("PUBLISH_MAX_RETRIES", "3"))
 PUBLISH_RETRY_DELAY = int(os.environ.get("PUBLISH_RETRY_DELAY", "5"))  # seconds

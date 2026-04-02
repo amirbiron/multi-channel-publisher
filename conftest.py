@@ -22,3 +22,11 @@ os.environ.setdefault("GBP_ACCOUNT_ID", "accounts/fake-account-id")
 os.environ.setdefault("GBP_OAUTH_CLIENT_ID", "fake-gbp-client-id")
 os.environ.setdefault("GBP_OAUTH_CLIENT_SECRET", "fake-gbp-client-secret")
 os.environ.setdefault("GBP_REFRESH_TOKEN", "fake-gbp-refresh-token")
+
+# LinkedIn feature flag — enable for tests
+os.environ.setdefault("LI_ENABLED", "true")
+
+# LinkedIn OAuth
+os.environ.setdefault("LI_OAUTH_CLIENT_ID", "fake-li-client-id")
+os.environ.setdefault("LI_OAUTH_CLIENT_SECRET", "fake-li-client-secret")
+os.environ.setdefault("LI_REFRESH_TOKEN", "fake-li-refresh-token")

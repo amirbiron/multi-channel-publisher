@@ -21,11 +21,14 @@ from media_processor import (
     _replace_extension,
     _is_video_compliant,
     _has_audio_stream,
+    _targets_li,
     MAX_IMAGE_SIZE,
     MIN_RATIO,
     MAX_RATIO,
     MIN_WIDTH,
     TARGET_WIDTH,
+    LI_VIDEO_MAX_SIZE,
+    LI_VIDEO_MAX_DURATION,
 )
 
 
@@ -544,3 +547,57 @@ class TestNormalizeMediaDispatch:
     def test_quicktime_dispatches_to_video(self, mock_vid):
         normalize_media(b"mov", "video/quicktime", "v.mov", "REELS")
         mock_vid.assert_called_once()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  _targets_li — network detection
+# ═══════════════════════════════════════════════════════════════
+
+class TestTargetsLi:
+    def test_li_only(self):
+        assert _targets_li("LI") is True
+
+    def test_ig_li(self):
+        assert _targets_li("IG+LI") is True
+
+    def test_fb_li(self):
+        assert _targets_li("FB+LI") is True
+
+    def test_gbp_li(self):
+        assert _targets_li("GBP+LI") is True
+
+    def test_ig_fb_li(self):
+        assert _targets_li("IG+FB+LI") is True
+
+    def test_ig_fb_gbp_li(self):
+        assert _targets_li("IG+FB+GBP+LI") is True
+
+    def test_all_includes_li(self):
+        assert _targets_li("ALL") is True
+
+    def test_ig_only_no_li(self):
+        assert _targets_li("IG") is False
+
+    def test_ig_fb_no_li(self):
+        assert _targets_li("IG+FB") is False
+
+    def test_ig_fb_gbp_no_li(self):
+        assert _targets_li("IG+FB+GBP") is False
+
+    def test_empty_string_no_li(self):
+        assert _targets_li("") is False
+
+    def test_gbp_only_no_li(self):
+        assert _targets_li("GBP") is False
+
+
+# ═══════════════════════════════════════════════════════════════
+#  LinkedIn video size/duration limits
+# ═══════════════════════════════════════════════════════════════
+
+class TestLinkedInMediaLimits:
+    def test_li_video_max_size_is_200mb(self):
+        assert LI_VIDEO_MAX_SIZE == 209_715_200
+
+    def test_li_video_max_duration_is_10min(self):
+        assert LI_VIDEO_MAX_DURATION == 600

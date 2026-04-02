@@ -36,6 +36,7 @@ from main import (
 HEADER = [
     "id", "status", "network", "post_type", "publish_at",
     "caption", "caption_ig", "caption_fb", "caption_gbp",
+    "caption_li", "li_author_urn",
     "gbp_post_type", "cta_type", "cta_url", "google_location_id",
     "drive_file_id", "cloudinary_url", "source",
     "result", "error",
@@ -54,6 +55,8 @@ def _build_row(
     caption_ig="",
     caption_fb="",
     caption_gbp="",
+    caption_li="",
+    li_author_urn="",
     gbp_post_type="",
     cta_type="",
     cta_url="",
@@ -73,6 +76,7 @@ def _build_row(
     return [
         row_id, status, network, post_type, publish_at,
         caption, caption_ig, caption_fb, caption_gbp,
+        caption_li, li_author_urn,
         gbp_post_type, cta_type, cta_url, google_location_id,
         drive_file_id, cloudinary_url, source,
         result, error,
@@ -762,3 +766,487 @@ class TestE2E_Scenario7_Caption_Fallback:
         assert final_update["status"] == STATUS_ERROR
         assert "caption" in final_update["error"].lower() or \
                "GBP_CAPTION_MISSING" in final_update["error"]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  LinkedIn helpers
+# ═══════════════════════════════════════════════════════════════
+
+
+def _mock_li_post_success(post_id="urn:li:share:12345"):
+    """Create a mock LinkedIn create-post response (201)."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 201
+    mock_resp.headers = {"x-restli-id": post_id}
+    mock_resp.json.return_value = {"id": post_id}
+    mock_resp.raise_for_status = MagicMock()
+    return mock_resp
+
+
+def _mock_li_post_failure(status_code=500, text="Internal Server Error"):
+    """Create a mock LinkedIn API error response."""
+    import requests as _req
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    mock_resp.text = text
+    mock_resp.raise_for_status.side_effect = _req.HTTPError(response=mock_resp)
+    return mock_resp
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Scenario 8: LI text-only — success
+# ═══════════════════════════════════════════════════════════════
+
+class TestE2E_Scenario8_LI_TextOnly:
+    """LinkedIn text-only post (no media) — should publish successfully."""
+
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("channels.linkedin.get_li_oauth_manager")
+    @patch("channels.linkedin.requests.post")
+    def test_li_text_only_success(self, mock_li_post, mock_auth,
+                                    mock_sheets, mock_reread):
+        mock_auth.return_value.get_auth_headers.return_value = {
+            "Authorization": "Bearer li_fake",
+            "LinkedIn-Version": "202401",
+            "Content-Type": "application/json",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+        mock_li_post.return_value = _mock_li_post_success("urn:li:share:88888")
+
+        row = _build_row(
+            network="LI",
+            caption_li="LinkedIn text post",
+            li_author_urn="urn:li:person:abc123",
+            drive_file_id="",  # no media
+        )
+        mock_reread.return_value = _locked_row(
+            network="LI",
+            caption_li="LinkedIn text post",
+            li_author_urn="urn:li:person:abc123",
+            drive_file_id="",
+        )
+
+        process_row(row, HEADER, 2)
+
+        # Verify LinkedIn API was called
+        mock_li_post.assert_called_once()
+        call_body = mock_li_post.call_args.kwargs.get("json") or mock_li_post.call_args[1].get("json")
+        assert call_body["author"] == "urn:li:person:abc123"
+        assert call_body["commentary"] == "LinkedIn text post"
+        assert "content" not in call_body  # no media
+
+        # Verify status → POSTED
+        final_update = mock_sheets.call_args_list[-1][0][1]
+        assert final_update["status"] == STATUS_POSTED
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Scenario 9: IG+LI — both succeed
+# ═══════════════════════════════════════════════════════════════
+
+class TestE2E_Scenario9_IG_LI:
+    """IG+LI: both channels succeed → POSTED."""
+
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
+    @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
+    @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
+    @patch("meta_publish.ig_publish_feed", return_value="ig_media_009")
+    @patch("channels.linkedin.get_li_oauth_manager")
+    @patch("channels.linkedin.requests.get")
+    @patch("channels.linkedin.requests.put")
+    @patch("channels.linkedin.requests.post")
+    def test_ig_li_both_succeed(self, mock_li_post, mock_li_put, mock_li_get,
+                                  mock_li_auth, mock_ig,
+                                  mock_drive, _mock_vmp, mock_norm, mock_cloud,
+                                  mock_sheets, mock_reread):
+        mock_li_auth.return_value.get_auth_headers.return_value = {
+            "Authorization": "Bearer li_fake",
+            "LinkedIn-Version": "202401",
+            "Content-Type": "application/json",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+
+        # LinkedIn with media: initializeUpload → create post
+        init_resp = MagicMock()
+        init_resp.status_code = 200
+        init_resp.json.return_value = {
+            "value": {
+                "uploadUrl": "https://www.linkedin.com/dms-uploads/img",
+                "image": "urn:li:image:e2e009",
+            }
+        }
+        init_resp.raise_for_status = MagicMock()
+        post_resp = _mock_li_post_success("urn:li:share:99009")
+        mock_li_post.side_effect = [init_resp, post_resp]
+
+        # Mock image download and upload
+        img_resp = MagicMock()
+        img_resp.content = b"fake-img-bytes"
+        img_resp.raise_for_status = MagicMock()
+        mock_li_get.return_value = img_resp
+        upload_resp = MagicMock()
+        upload_resp.raise_for_status = MagicMock()
+        mock_li_put.return_value = upload_resp
+
+        row = _build_row(
+            network="IG+LI",
+            caption_ig="IG text",
+            caption_li="LI text",
+            li_author_urn="urn:li:person:abc123",
+        )
+        mock_reread.return_value = _locked_row(
+            network="IG+LI",
+            caption_ig="IG text",
+            caption_li="LI text",
+            li_author_urn="urn:li:person:abc123",
+        )
+
+        process_row(row, HEADER, 2)
+
+        mock_ig.assert_called_once()
+
+        final_update = mock_sheets.call_args_list[-1][0][1]
+        assert final_update["status"] == STATUS_POSTED
+        assert "IG" in final_update["published_channels"]
+        assert "LI" in final_update["published_channels"]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Scenario 10: IG+FB+LI — all succeed
+# ═══════════════════════════════════════════════════════════════
+
+class TestE2E_Scenario10_IG_FB_LI:
+    """IG+FB+LI: all three channels succeed → POSTED."""
+
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
+    @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
+    @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
+    @patch("meta_publish.fb_publish_feed", return_value="fb_post_010")
+    @patch("meta_publish.ig_publish_feed", return_value="ig_media_010")
+    @patch("channels.linkedin.get_li_oauth_manager")
+    @patch("channels.linkedin.requests.get")
+    @patch("channels.linkedin.requests.put")
+    @patch("channels.linkedin.requests.post")
+    def test_ig_fb_li_all_succeed(self, mock_li_post, mock_li_put, mock_li_get,
+                                    mock_li_auth,
+                                    mock_ig, mock_fb,
+                                    mock_drive, _mock_vmp, mock_norm, mock_cloud,
+                                    mock_sheets, mock_reread):
+        mock_li_auth.return_value.get_auth_headers.return_value = {
+            "Authorization": "Bearer li_fake",
+            "LinkedIn-Version": "202401",
+            "Content-Type": "application/json",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+
+        # LinkedIn with media: initializeUpload → create post
+        init_resp = MagicMock()
+        init_resp.status_code = 200
+        init_resp.json.return_value = {
+            "value": {
+                "uploadUrl": "https://www.linkedin.com/dms-uploads/img",
+                "image": "urn:li:image:e2e010",
+            }
+        }
+        init_resp.raise_for_status = MagicMock()
+        post_resp = _mock_li_post_success("urn:li:share:10010")
+        mock_li_post.side_effect = [init_resp, post_resp]
+
+        img_resp = MagicMock()
+        img_resp.content = b"fake-img-bytes"
+        img_resp.raise_for_status = MagicMock()
+        mock_li_get.return_value = img_resp
+        upload_resp = MagicMock()
+        upload_resp.raise_for_status = MagicMock()
+        mock_li_put.return_value = upload_resp
+
+        row = _build_row(
+            network="IG+FB+LI",
+            caption_ig="IG text",
+            caption_fb="FB text",
+            caption_li="LI text",
+            li_author_urn="urn:li:person:abc123",
+        )
+        mock_reread.return_value = _locked_row(
+            network="IG+FB+LI",
+            caption_ig="IG text",
+            caption_fb="FB text",
+            caption_li="LI text",
+            li_author_urn="urn:li:person:abc123",
+        )
+
+        process_row(row, HEADER, 2)
+
+        mock_ig.assert_called_once()
+        mock_fb.assert_called_once()
+
+        final_update = mock_sheets.call_args_list[-1][0][1]
+        assert final_update["status"] == STATUS_POSTED
+        assert "IG" in final_update["published_channels"]
+        assert "FB" in final_update["published_channels"]
+        assert "LI" in final_update["published_channels"]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Scenario 11: IG+FB+GBP+LI — all four succeed (ALL)
+# ═══════════════════════════════════════════════════════════════
+
+class TestE2E_Scenario11_ALL_Four_Channels:
+    """ALL (IG+FB+GBP+LI): all four channels succeed → POSTED."""
+
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
+    @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
+    @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
+    @patch("meta_publish.fb_publish_feed", return_value="fb_post_011")
+    @patch("meta_publish.ig_publish_feed", return_value="ig_media_011")
+    @patch("channels.google_auth.get_oauth_manager")
+    @patch("channels.linkedin.get_li_oauth_manager")
+    @patch("channels.linkedin.requests.get")
+    @patch("channels.linkedin.requests.put")
+    @patch("requests.post")  # Shared: both GBP and LI use requests.post
+    def test_all_four_succeed(self, mock_post, mock_li_put, mock_li_get,
+                                mock_li_auth,
+                                mock_gbp_auth,
+                                mock_ig, mock_fb,
+                                mock_drive, _mock_vmp, mock_norm, mock_cloud,
+                                mock_sheets, mock_reread):
+        mock_li_auth.return_value.get_auth_headers.return_value = {
+            "Authorization": "Bearer li_fake",
+            "LinkedIn-Version": "202401",
+            "Content-Type": "application/json",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+        mock_gbp_auth.return_value.get_auth_headers.return_value = {
+            "Authorization": "Bearer gbp_fake",
+        }
+
+        # URL-based routing for requests.post (shared by GBP and LI)
+        gbp_resp = _mock_gbp_success()
+        li_init_resp = MagicMock()
+        li_init_resp.status_code = 200
+        li_init_resp.json.return_value = {
+            "value": {
+                "uploadUrl": "https://www.linkedin.com/dms-uploads/img",
+                "image": "urn:li:image:e2e011",
+            }
+        }
+        li_init_resp.raise_for_status = MagicMock()
+        li_post_resp = _mock_li_post_success("urn:li:share:11011")
+
+        def route_post(url, **kwargs):
+            if "mybusiness.googleapis.com" in url:
+                return gbp_resp
+            elif "images?action=initializeUpload" in url:
+                return li_init_resp
+            elif "api.linkedin.com/rest/posts" in url:
+                return li_post_resp
+            return MagicMock()
+
+        mock_post.side_effect = route_post
+
+        img_resp = MagicMock()
+        img_resp.content = b"fake-img-bytes"
+        img_resp.raise_for_status = MagicMock()
+        mock_li_get.return_value = img_resp
+        upload_resp = MagicMock()
+        upload_resp.raise_for_status = MagicMock()
+        mock_li_put.return_value = upload_resp
+
+        row = _build_row(
+            network="IG+FB+GBP+LI",
+            caption_ig="IG text",
+            caption_fb="FB text",
+            caption_gbp="GBP text",
+            caption_li="LI text",
+            li_author_urn="urn:li:person:abc123",
+            google_location_id="locations/456",
+            gbp_post_type="STANDARD",
+        )
+        mock_reread.return_value = _locked_row(
+            network="IG+FB+GBP+LI",
+            caption_ig="IG text",
+            caption_fb="FB text",
+            caption_gbp="GBP text",
+            caption_li="LI text",
+            li_author_urn="urn:li:person:abc123",
+            google_location_id="locations/456",
+            gbp_post_type="STANDARD",
+        )
+
+        process_row(row, HEADER, 2)
+
+        mock_ig.assert_called_once()
+        mock_fb.assert_called_once()
+
+        final_update = mock_sheets.call_args_list[-1][0][1]
+        assert final_update["status"] == STATUS_POSTED
+        assert "IG" in final_update["published_channels"]
+        assert "FB" in final_update["published_channels"]
+        assert "GBP" in final_update["published_channels"]
+        assert "LI" in final_update["published_channels"]
+        assert final_update["failed_channels"] == ""
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Scenario 12: LI fails → PARTIAL
+# ═══════════════════════════════════════════════════════════════
+
+class TestE2E_Scenario12_LI_Fails_Partial:
+    """IG+LI: IG succeeds, LI fails → PARTIAL status."""
+
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
+    @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
+    @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
+    @patch("meta_publish.ig_publish_feed", return_value="ig_media_012")
+    @patch("channels.linkedin.get_li_oauth_manager")
+    @patch("channels.linkedin.requests.post")
+    @patch("main.PUBLISH_MAX_RETRIES", 1)
+    def test_partial_when_li_fails(self, mock_li_post, mock_li_auth,
+                                     mock_ig,
+                                     mock_drive, _mock_vmp, mock_norm, mock_cloud,
+                                     mock_sheets, mock_reread):
+        mock_li_auth.return_value.get_auth_headers.return_value = {
+            "Authorization": "Bearer li_fake",
+            "LinkedIn-Version": "202401",
+            "Content-Type": "application/json",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+        # The initializeUpload call itself fails with 500
+        mock_li_post.return_value = _mock_li_post_failure(500, "Internal Server Error")
+
+        row = _build_row(
+            network="IG+LI",
+            caption_ig="IG text",
+            caption_li="LI text",
+            li_author_urn="urn:li:person:abc123",
+        )
+        mock_reread.return_value = _locked_row(
+            network="IG+LI",
+            caption_ig="IG text",
+            caption_li="LI text",
+            li_author_urn="urn:li:person:abc123",
+        )
+
+        process_row(row, HEADER, 2)
+
+        mock_ig.assert_called_once()
+
+        final_update = mock_sheets.call_args_list[-1][0][1]
+        assert final_update["status"] == STATUS_PARTIAL
+        assert "IG" in final_update["published_channels"]
+        assert "LI" in final_update["failed_channels"]
+        assert "IG:POSTED:ig_media_012" in final_update["result"]
+        assert "LI:ERROR:" in final_update["result"]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Scenario 13: LI + FB fail → PARTIAL (only IG succeeded)
+# ═══════════════════════════════════════════════════════════════
+
+class TestE2E_Scenario13_LI_FB_Fail_Partial:
+    """IG+FB+LI: LI and FB fail, only IG succeeds → PARTIAL."""
+
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
+    @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
+    @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
+    @patch("meta_publish.fb_publish_feed", side_effect=Exception("FB API Error"))
+    @patch("meta_publish.ig_publish_feed", return_value="ig_media_013")
+    @patch("channels.linkedin.get_li_oauth_manager")
+    @patch("channels.linkedin.requests.post")
+    @patch("main.PUBLISH_MAX_RETRIES", 1)
+    def test_partial_li_and_fb_fail(self, mock_li_post, mock_li_auth,
+                                      mock_ig, mock_fb,
+                                      mock_drive, _mock_vmp, mock_norm, mock_cloud,
+                                      mock_sheets, mock_reread):
+        mock_li_auth.return_value.get_auth_headers.return_value = {
+            "Authorization": "Bearer li_fake",
+            "LinkedIn-Version": "202401",
+            "Content-Type": "application/json",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+        # initializeUpload fails with 429
+        mock_li_post.return_value = _mock_li_post_failure(429, "Too Many Requests")
+
+        row = _build_row(
+            network="IG+FB+LI",
+            caption_ig="IG text",
+            caption_fb="FB text",
+            caption_li="LI text",
+            li_author_urn="urn:li:person:abc123",
+        )
+        mock_reread.return_value = _locked_row(
+            network="IG+FB+LI",
+            caption_ig="IG text",
+            caption_fb="FB text",
+            caption_li="LI text",
+            li_author_urn="urn:li:person:abc123",
+        )
+
+        process_row(row, HEADER, 2)
+
+        mock_ig.assert_called_once()
+
+        final_update = mock_sheets.call_args_list[-1][0][1]
+        assert final_update["status"] == STATUS_PARTIAL
+        assert "IG" in final_update["published_channels"]
+        assert "LI" in final_update["failed_channels"]
+        assert "FB" in final_update["failed_channels"]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Scenario 14: LI disabled flag — LI not in network doesn't affect
+# ═══════════════════════════════════════════════════════════════
+
+class TestE2E_Scenario14_LI_Not_Targeted:
+    """When LI is not in the network, it should not be invoked at all."""
+
+    @patch("main.sheets_read_row")
+    @patch("main.sheets_update_cells")
+    @patch("main.upload_to_cloudinary", return_value=_CLOUD_URL)
+    @patch("main.normalize_media", side_effect=_NORM_PASSTHROUGH)
+    @patch("main.validate_media_pre_publish", return_value=None)
+    @patch("main.drive_download_with_metadata", return_value=_DRIVE_RETURN)
+    @patch("meta_publish.ig_publish_feed", return_value="ig_media_014")
+    @patch("meta_publish.fb_publish_feed", return_value="fb_post_014")
+    def test_ig_fb_without_li(self, mock_fb, mock_ig,
+                                mock_drive, _mock_vmp, mock_norm, mock_cloud,
+                                mock_sheets, mock_reread):
+        """IG+FB row should not invoke LinkedIn channel at all."""
+        row = _build_row(
+            network="IG+FB",
+            caption_ig="IG text",
+            caption_fb="FB text",
+        )
+        mock_reread.return_value = _locked_row(
+            network="IG+FB",
+            caption_ig="IG text",
+            caption_fb="FB text",
+        )
+
+        with patch("channels.linkedin.get_li_oauth_manager") as mock_li_auth, \
+             patch("channels.linkedin.requests.post") as mock_li_post:
+            process_row(row, HEADER, 2)
+
+            # LinkedIn should NOT be called
+            mock_li_post.assert_not_called()
+
+        final_update = mock_sheets.call_args_list[-1][0][1]
+        assert final_update["status"] == STATUS_POSTED
+        assert "LI" not in final_update.get("published_channels", "")
+        assert "LI" not in final_update.get("failed_channels", "")

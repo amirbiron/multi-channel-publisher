@@ -156,7 +156,7 @@ class TestPublishWithImage:
         call_kwargs = mock_post.call_args
         body = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
         assert "content" in body
-        assert body["content"]["media"]["id"] == "https://res.cloudinary.com/test/image.jpg"
+        assert body["content"]["media"][0]["id"] == "https://res.cloudinary.com/test/image.jpg"
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -205,10 +205,12 @@ class LinkedInChannel(BaseChannel):
             first_mime = mime_types[0]
             if first_mime.startswith("image/") or first_mime.startswith("video/"):
                 body["content"] = {
-                    "media": {
-                        "title": "",
-                        "id": cloud_urls[0],
-                    },
+                    "media": [
+                        {
+                            "title": "",
+                            "id": cloud_urls[0],
+                        },
+                    ],
                 }
 
         url = f"{_LI_API_BASE}/posts"

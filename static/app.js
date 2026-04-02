@@ -126,7 +126,8 @@ function getFilteredPosts() {
       const inIg = (post.caption_ig || '').toLowerCase().includes(q);
       const inFb = (post.caption_fb || '').toLowerCase().includes(q);
       const inGbp = (post.caption_gbp || '').toLowerCase().includes(q);
-      if (!inCaption && !inIg && !inFb && !inGbp) return false;
+      const inLi = (post.caption_li || '').toLowerCase().includes(q);
+      if (!inCaption && !inIg && !inFb && !inGbp && !inLi) return false;
     }
 
     return true;
@@ -249,7 +250,7 @@ function renderPosts() {
     // Show "no results" only when filters are active but no posts match
     if (posts.length > 0 && filtered.length === 0) {
       showElement('posts-table-wrapper');
-      tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:var(--space-2xl); color:var(--color-text-muted)">לא נמצאו פוסטים לפי הסינון הנוכחי</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:var(--space-2xl); color:var(--color-text-muted)">לא נמצאו פוסטים לפי הסינון הנוכחי</td></tr>`;
       if (cardsEl) {
         cardsEl.classList.remove('hidden');
         cardsEl.innerHTML = `<div class="post-card-empty">לא נמצאו פוסטים לפי הסינון הנוכחי</div>`;
@@ -338,6 +339,7 @@ function renderPosts() {
       <td class="cell-caption ${post.caption_ig ? 'cell-clickable' : ''}" ${post.caption_ig ? `onclick="openCaptionModal('קפשן IG', this.dataset.full)" data-full="${escapeHtml(post.caption_ig)}"` : ''} title="${escapeHtml(post.caption_ig || '')}">${captionIg}</td>
       <td class="cell-caption ${post.caption_fb ? 'cell-clickable' : ''}" ${post.caption_fb ? `onclick="openCaptionModal('קפשן FB', this.dataset.full)" data-full="${escapeHtml(post.caption_fb)}"` : ''} title="${escapeHtml(post.caption_fb || '')}">${captionFb}</td>
       <td class="cell-caption ${post.caption_gbp ? 'cell-clickable' : ''}" ${post.caption_gbp ? `onclick="openCaptionModal('קפשן GBP', this.dataset.full)" data-full="${escapeHtml(post.caption_gbp)}"` : ''} title="${escapeHtml(post.caption_gbp || '')}">${truncate(post.caption_gbp, 40)}</td>
+      <td class="cell-caption ${post.caption_li ? 'cell-clickable' : ''}" ${post.caption_li ? `onclick="openCaptionModal('קפשן LI', this.dataset.full)" data-full="${escapeHtml(post.caption_li)}"` : ''} title="${escapeHtml(post.caption_li || '')}">${truncate(post.caption_li, 40)}</td>
       <td class="cell-file">${fileCell}</td>
       <td class="cell-results">${resultsCell}</td>
       <td class="cell-actions">
@@ -390,6 +392,14 @@ function renderPosts() {
            </div>`
         : '';
 
+      const captionLiPart = post.caption_li
+        ? `<div class="post-card-divider"></div>
+           <div>
+             <span class="post-card-label">קפשן LI</span>
+             <div class="post-card-caption" onclick="openCaptionModal('קפשן LI', this.dataset.full)" data-full="${escapeHtml(post.caption_li)}">${escapeHtml(post.caption_li)}</div>
+           </div>`
+        : '';
+
       // Channel results + retry for mobile
       let resultsPart = '';
       const hasRetryButtons = hasFailures && failedChannels.length > 0;
@@ -428,6 +438,7 @@ function renderPosts() {
         ${captionIgPart}
         ${captionFbPart}
         ${captionGbpPart}
+        ${captionLiPart}
         ${filePart}
         ${resultsPart}
         <div class="post-card-divider"></div>
@@ -492,12 +503,13 @@ function getSelectedChannels() {
   if (document.getElementById('form-ch-ig').checked) channels.push('IG');
   if (document.getElementById('form-ch-fb').checked) channels.push('FB');
   if (document.getElementById('form-ch-gbp').checked) channels.push('GBP');
+  if (document.getElementById('form-ch-li').checked) channels.push('LI');
   return channels;
 }
 
 function channelsToNetwork(channels) {
   const sorted = [...channels].sort((a, b) => {
-    const order = { IG: 0, FB: 1, GBP: 2 };
+    const order = { IG: 0, FB: 1, GBP: 2, LI: 3 };
     return (order[a] ?? 9) - (order[b] ?? 9);
   });
   return sorted.join('+') || '';
@@ -505,7 +517,7 @@ function channelsToNetwork(channels) {
 
 function networkToChannels(network) {
   if (!network) return ['IG', 'FB'];
-  if (network === 'ALL') return ['IG', 'FB', 'GBP'];
+  if (network === 'ALL') return ['IG', 'FB', 'GBP', 'LI'];
   return network.split('+').filter(Boolean);
 }
 
@@ -513,6 +525,7 @@ function setChannelCheckboxes(channels) {
   document.getElementById('form-ch-ig').checked = channels.includes('IG');
   document.getElementById('form-ch-fb').checked = channels.includes('FB');
   document.getElementById('form-ch-gbp').checked = channels.includes('GBP');
+  document.getElementById('form-ch-li').checked = channels.includes('LI');
 }
 
 function onChannelChange() {
@@ -520,6 +533,7 @@ function onChannelChange() {
   const hasIG = channels.includes('IG');
   const hasFB = channels.includes('FB');
   const hasGBP = channels.includes('GBP');
+  const hasLI = channels.includes('LI');
   const postTypeSelect = document.getElementById('form-post-type');
   const currentValue = postTypeSelect.value;
 
@@ -541,6 +555,17 @@ function onChannelChange() {
 
   // Show/hide GBP fields section
   document.getElementById('gbp-fields').classList.toggle('hidden', !hasGBP);
+
+  // Show/hide LinkedIn fields section
+  document.getElementById('li-fields').classList.toggle('hidden', !hasLI);
+}
+
+function onLiAuthorTypeChange() {
+  const type = document.getElementById('form-li-author-type').value;
+  const input = document.getElementById('form-li-author-urn');
+  input.placeholder = type === 'person'
+    ? 'urn:li:person:xxxxxxxxx'
+    : 'urn:li:organization:xxxxxxxxx';
 }
 
 function onCtaTypeChange() {
@@ -672,7 +697,8 @@ function _applyLocationFallback(select, manual, locationId) {
 
 function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'FEED',
                          publishAt = '', caption = '', captionIg = '', captionFb = '',
-                         captionGbp = '', gbpPostType = 'STANDARD',
+                         captionGbp = '', captionLi = '', liAuthorUrn = '',
+                         gbpPostType = 'STANDARD',
                          googleLocationId = '', ctaType = '', ctaUrl = '',
                          driveFileId = '', postId = null } = {}) {
   editPostId = postId;
@@ -693,6 +719,14 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
   document.getElementById('form-caption-ig').value = captionIg;
   document.getElementById('form-caption-fb').value = captionFb;
   document.getElementById('form-caption-gbp').value = captionGbp;
+  document.getElementById('form-caption-li').value = captionLi;
+  document.getElementById('form-li-author-urn').value = liAuthorUrn;
+  if (liAuthorUrn && liAuthorUrn.includes(':organization:')) {
+    document.getElementById('form-li-author-type').value = 'organization';
+  } else {
+    document.getElementById('form-li-author-type').value = 'person';
+  }
+  onLiAuthorTypeChange();
   document.getElementById('form-gbp-post-type').value = gbpPostType || 'STANDARD';
   document.getElementById('form-cta-type').value = ctaType;
   document.getElementById('form-cta-url').value = ctaUrl;
@@ -730,6 +764,7 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
   updateCharCounter('ig');
   updateCharCounter('fb');
   updateCharCounter('gbp');
+  updateCharCounter('li');
   openModal('post-modal');
 }
 
@@ -765,6 +800,8 @@ function openEditModal(rowNumber) {
     captionIg: post.caption_ig || '',
     captionFb: post.caption_fb || '',
     captionGbp: post.caption_gbp || '',
+    captionLi: post.caption_li || '',
+    liAuthorUrn: post.li_author_urn || '',
     gbpPostType: post.gbp_post_type || 'STANDARD',
     googleLocationId: post.google_location_id || '',
     ctaType: post.cta_type || '',
@@ -788,6 +825,8 @@ function duplicatePost(rowNumber) {
     captionIg: post.caption_ig || '',
     captionFb: post.caption_fb || '',
     captionGbp: post.caption_gbp || '',
+    captionLi: post.caption_li || '',
+    liAuthorUrn: post.li_author_urn || '',
     gbpPostType: post.gbp_post_type || 'STANDARD',
     googleLocationId: post.google_location_id || '',
     ctaType: post.cta_type || '',
@@ -812,6 +851,7 @@ async function savePost() {
   const channels = getSelectedChannels();
   const network = channelsToNetwork(channels);
   const hasGBP = channels.includes('GBP');
+  const hasLI = channels.includes('LI');
 
   // Get google_location_id from select or manual input
   const locationSelect = document.getElementById('form-google-location-id').value;
@@ -826,6 +866,8 @@ async function savePost() {
     caption_ig: document.getElementById('form-caption-ig').value,
     caption_fb: document.getElementById('form-caption-fb').value,
     caption_gbp: document.getElementById('form-caption-gbp').value,
+    caption_li: document.getElementById('form-caption-li').value,
+    li_author_urn: document.getElementById('form-li-author-urn').value.trim(),
     gbp_post_type: document.getElementById('form-gbp-post-type').value,
     google_location_id: googleLocationId,
     cta_type: document.getElementById('form-cta-type').value,
@@ -847,11 +889,15 @@ async function savePost() {
     showToast('יש לבחור תאריך ושעת פרסום', 'error');
     return;
   }
-  // GBP supports text-only posts (no media required).
-  // Only require media when at least one non-GBP channel is selected.
-  const needsMedia = channels.some(ch => ch !== 'GBP');
+  // GBP and LI support text-only posts (no media required).
+  // Only require media when at least one non-GBP/non-LI channel is selected.
+  const needsMedia = channels.some(ch => ch !== 'GBP' && ch !== 'LI');
   if (needsMedia && !data.drive_file_id) {
     showToast('יש לבחור קובץ מדיה', 'error');
+    return;
+  }
+  if (hasLI && !data.li_author_urn) {
+    showToast('יש להזין LinkedIn Author URN', 'error');
     return;
   }
   if (hasGBP && !googleLocationId) {
@@ -1472,10 +1518,18 @@ function networkLabel(network) {
     'IG': 'IG',
     'FB': 'FB',
     'GBP': 'GBP',
+    'LI': 'LI',
     'IG+FB': 'IG+FB',
     'IG+GBP': 'IG+GBP',
+    'IG+LI': 'IG+LI',
     'FB+GBP': 'FB+GBP',
+    'FB+LI': 'FB+LI',
+    'GBP+LI': 'GBP+LI',
     'IG+FB+GBP': 'IG+FB+GBP',
+    'IG+FB+LI': 'IG+FB+LI',
+    'IG+GBP+LI': 'IG+GBP+LI',
+    'FB+GBP+LI': 'FB+GBP+LI',
+    'IG+FB+GBP+LI': 'IG+FB+GBP+LI',
     'ALL': 'הכל',
   };
   return map[network] || escapeHtml(network) || '-';

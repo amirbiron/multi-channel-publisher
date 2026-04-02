@@ -119,10 +119,18 @@
                 <option value="IG">אינסטגרם</option>
                 <option value="FB">פייסבוק</option>
                 <option value="GBP">Google Business</option>
+                <option value="LI">LinkedIn</option>
                 <option value="IG+FB">IG+FB</option>
                 <option value="IG+GBP">IG+GBP</option>
+                <option value="IG+LI">IG+LI</option>
                 <option value="FB+GBP">FB+GBP</option>
+                <option value="FB+LI">FB+LI</option>
+                <option value="GBP+LI">GBP+LI</option>
                 <option value="IG+FB+GBP">IG+FB+GBP</option>
+                <option value="IG+FB+LI">IG+FB+LI</option>
+                <option value="IG+GBP+LI">IG+GBP+LI</option>
+                <option value="FB+GBP+LI">FB+GBP+LI</option>
+                <option value="IG+FB+GBP+LI">IG+FB+GBP+LI</option>
               </select>
             </div>
             <div class="filter-group">
@@ -163,6 +171,7 @@
                 <th>קפשן IG</th>
                 <th>קפשן FB</th>
                 <th>קפשן GBP</th>
+                <th>קפשן LI</th>
                 <th class="th-file" onclick="toggleFileIds()" style="cursor:pointer; user-select:none" title="הצג/הסתר מזהי קבצים">
                   קובץ <span id="file-id-toggle-arrow" style="font-size:10px">&#9664;</span>
                 </th>
@@ -226,6 +235,10 @@
             <label class="channel-checkbox">
               <input type="checkbox" id="form-ch-gbp" onchange="onChannelChange()">
               <span class="channel-checkbox-label">GBP</span>
+            </label>
+            <label class="channel-checkbox">
+              <input type="checkbox" id="form-ch-li" onchange="onChannelChange()">
+              <span class="channel-checkbox-label">LI</span>
             </label>
           </div>
         </div>
@@ -323,6 +336,32 @@
             <label class="form-label">כתובת CTA</label>
             <input type="url" class="form-input" id="form-cta-url" placeholder="https://..." dir="ltr">
           </div>
+        </div>
+      </div>
+
+      <!-- LinkedIn Fields -->
+      <div id="li-fields" class="li-fields-section hidden">
+        <div class="form-section-divider">
+          <span class="form-section-title">LinkedIn</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">קפשן LinkedIn <span class="form-hint">(אם שונה מהכללי)</span></label>
+          <textarea class="form-textarea" id="form-caption-li" rows="3" placeholder="טקסט הפוסט ל-LinkedIn..." oninput="updateCharCounter('li')"></textarea>
+          <div class="char-counter" id="char-counter-li">
+            <span id="char-count-li">0</span> / 3,000
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">LinkedIn Author <span class="form-required">*</span></label>
+          <select class="form-select" id="form-li-author-type" onchange="onLiAuthorTypeChange()">
+            <option value="person">פרופיל אישי (Person)</option>
+            <option value="organization">דף ארגוני (Organization)</option>
+          </select>
+          <input type="text" class="form-input mt-sm" id="form-li-author-urn"
+                 placeholder="urn:li:person:xxxxxxxxx" dir="ltr">
+          <div class="form-hint mt-sm">הזן את ה-URN המלא, למשל: urn:li:person:ABC123 או urn:li:organization:12345</div>
         </div>
       </div>
 

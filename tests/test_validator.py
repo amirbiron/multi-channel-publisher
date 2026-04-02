@@ -11,12 +11,14 @@ from config_constants import (
     COL_CAPTION_FB,
     COL_CAPTION_GBP,
     COL_CAPTION_IG,
+    COL_CAPTION_LI,
     COL_CTA_TYPE,
     COL_CTA_URL,
     COL_DRIVE_FILE_ID,
     COL_FAILED_CHANNELS,
     COL_GBP_POST_TYPE,
     COL_GOOGLE_LOCATION_ID,
+    COL_LI_AUTHOR_URN,
     COL_NETWORK,
     COL_POST_TYPE,
     COL_PUBLISH_AT,
@@ -47,6 +49,8 @@ def _make_row(**overrides) -> dict[str, str]:
         COL_CAPTION_IG: "",
         COL_CAPTION_FB: "",
         COL_CAPTION_GBP: "",
+        COL_CAPTION_LI: "",
+        COL_LI_AUTHOR_URN: "",
         COL_GBP_POST_TYPE: "",
         COL_CTA_TYPE: "",
         COL_CTA_URL: "",
@@ -72,9 +76,28 @@ def _make_gbp_row(**overrides) -> dict[str, str]:
     )
 
 
+def _make_li_row(**overrides) -> dict[str, str]:
+    """Build a row targeting LinkedIn with all required fields."""
+    return _make_row(
+        **{
+            COL_NETWORK: "LI",
+            COL_CAPTION_LI: "LinkedIn post text",
+            COL_LI_AUTHOR_URN: "urn:li:person:abc123",
+            COL_DRIVE_FILE_ID: "",  # LI supports text-only
+            **overrides,
+        },
+    )
+
+
 @pytest.fixture
 def validator():
     return RowValidator(registered_channel_ids=["IG", "FB", "GBP"])
+
+
+@pytest.fixture
+def validator_all():
+    """Validator with all 4 channels registered (IG, FB, GBP, LI)."""
+    return RowValidator(registered_channel_ids=["IG", "FB", "GBP", "LI"])
 
 
 @pytest.fixture
@@ -469,3 +492,224 @@ class TestFormatHelpers:
         assert report.is_partially_approved
         assert not report.is_fully_approved
         assert len(report.channel_blocking_issues) > 0
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Phase 3: Channel Validation — LinkedIn
+# ═══════════════════════════════════════════════════════════════
+
+class TestChannelValidationLI:
+    def test_li_valid_text_only(self, validator_all):
+        row = _make_li_row()
+        report = validator_all.validate(row)
+        assert "LI" in report.approved_channels
+
+    def test_li_valid_organization_urn(self, validator_all):
+        row = _make_li_row(**{COL_LI_AUTHOR_URN: "urn:li:organization:12345"})
+        report = validator_all.validate(row)
+        assert "LI" in report.approved_channels
+
+    def test_li_missing_author_urn_blocked(self, validator_all):
+        row = _make_li_row(**{COL_LI_AUTHOR_URN: ""})
+        report = validator_all.validate(row)
+        assert "LI" in report.blocked_channels
+        issues = report.blocked_channels["LI"]
+        assert any(i.code == ErrorCode.LI_AUTHOR_URN_MISSING for i in issues)
+
+    def test_li_invalid_urn_format_blocked(self, validator_all):
+        row = _make_li_row(**{COL_LI_AUTHOR_URN: "not-a-valid-urn"})
+        report = validator_all.validate(row)
+        assert "LI" in report.blocked_channels
+        issues = report.blocked_channels["LI"]
+        assert any(i.code == ErrorCode.LI_INVALID_AUTHOR_URN for i in issues)
+
+    def test_li_wrong_entity_type_blocked(self, validator_all):
+        """urn:li:company is not valid — only person|organization."""
+        row = _make_li_row(**{COL_LI_AUTHOR_URN: "urn:li:company:123"})
+        report = validator_all.validate(row)
+        assert "LI" in report.blocked_channels
+        issues = report.blocked_channels["LI"]
+        assert any(i.code == ErrorCode.LI_INVALID_AUTHOR_URN for i in issues)
+
+    def test_li_missing_caption_blocked(self, validator_all):
+        """LI without any caption should be blocked (no media = text-only required)."""
+        row = _make_li_row(**{COL_CAPTION_LI: "", COL_CAPTION: ""})
+        report = validator_all.validate(row)
+        assert "LI" in report.blocked_channels
+        issues = report.blocked_channels["LI"]
+        assert any(i.code == ErrorCode.LI_CAPTION_MISSING for i in issues)
+
+    def test_li_caption_too_long_blocked(self, validator_all):
+        row = _make_li_row(**{COL_CAPTION_LI: "A" * 3001})
+        report = validator_all.validate(row)
+        assert "LI" in report.blocked_channels
+        issues = report.blocked_channels["LI"]
+        assert any(i.code == ErrorCode.LI_CAPTION_TOO_LONG for i in issues)
+
+    def test_li_caption_at_max_length_ok(self, validator_all):
+        row = _make_li_row(**{COL_CAPTION_LI: "A" * 3000})
+        report = validator_all.validate(row)
+        assert "LI" in report.approved_channels
+
+    def test_li_fallback_to_generic_caption(self, validator_all):
+        """LI should use generic caption when caption_li is empty."""
+        row = _make_li_row(**{COL_CAPTION_LI: "", COL_CAPTION: "Generic text"})
+        report = validator_all.validate(row)
+        assert "LI" in report.approved_channels
+        fallback_warnings = [w for w in report.warnings if w.code == ErrorCode.COMMON_CAPTION_FALLBACK and w.channel == "LI"]
+        assert len(fallback_warnings) == 1
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Network Combinations with LI
+# ═══════════════════════════════════════════════════════════════
+
+class TestNetworkCombinationsLI:
+    def test_li_only(self, validator_all):
+        row = _make_li_row(**{COL_NETWORK: "LI"})
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert set(report.approved_channels) == {"LI"}
+
+    def test_ig_li(self, validator_all):
+        row = _make_li_row(**{
+            COL_NETWORK: "IG+LI",
+            COL_CAPTION_IG: "IG text",
+            COL_DRIVE_FILE_ID: "drive-file-123",
+        })
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert "IG" in report.approved_channels
+        assert "LI" in report.approved_channels
+
+    def test_fb_li(self, validator_all):
+        row = _make_li_row(**{
+            COL_NETWORK: "FB+LI",
+            COL_CAPTION_FB: "FB text",
+            COL_DRIVE_FILE_ID: "drive-file-123",
+        })
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert "FB" in report.approved_channels
+        assert "LI" in report.approved_channels
+
+    def test_ig_fb_li(self, validator_all):
+        row = _make_li_row(**{
+            COL_NETWORK: "IG+FB+LI",
+            COL_CAPTION_IG: "IG text",
+            COL_CAPTION_FB: "FB text",
+            COL_DRIVE_FILE_ID: "drive-file-123",
+        })
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert set(report.approved_channels) == {"IG", "FB", "LI"}
+
+    def test_all_four_channels(self, validator_all):
+        row = _make_li_row(**{
+            COL_NETWORK: "IG+FB+GBP+LI",
+            COL_CAPTION_IG: "IG text",
+            COL_CAPTION_FB: "FB text",
+            COL_CAPTION_GBP: "GBP text",
+            COL_GOOGLE_LOCATION_ID: "locations/456",
+            COL_GBP_POST_TYPE: "STANDARD",
+            COL_DRIVE_FILE_ID: "drive-file-123",
+        })
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert set(report.approved_channels) == {"IG", "FB", "GBP", "LI"}
+
+    def test_all_expanded_includes_li(self, validator_all):
+        """ALL should expand to IG+FB+GBP+LI when all 4 channels registered."""
+        row = _make_li_row(**{
+            COL_NETWORK: "ALL",
+            COL_CAPTION_IG: "IG text",
+            COL_CAPTION_FB: "FB text",
+            COL_CAPTION_GBP: "GBP text",
+            COL_GOOGLE_LOCATION_ID: "locations/456",
+            COL_GBP_POST_TYPE: "STANDARD",
+            COL_DRIVE_FILE_ID: "drive-file-123",
+        })
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert set(report.approved_channels) == {"IG", "FB", "GBP", "LI"}
+
+    def test_old_ig_fb_rows_unaffected_by_li(self, validator_all):
+        """Old IG+FB rows should not require LI fields."""
+        row = _make_row(**{COL_NETWORK: "IG+FB"})
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert "LI" not in report.blocked_channels
+        assert "LI" not in report.approved_channels
+        assert set(report.approved_channels) == {"IG", "FB"}
+
+    def test_li_not_registered_skipped(self, validator):
+        """When LI not registered, it should be skipped, not block the row."""
+        row = _make_row(**{COL_NETWORK: "IG+FB+LI"})
+        report = validator.validate(row)
+        assert not report.row_blocked
+        assert "LI" in report.skipped_channels
+        assert set(report.approved_channels) == {"IG", "FB"}
+
+    def test_li_text_only_no_media_not_blocked(self, validator_all):
+        """LI supports text-only posts — missing drive_file_id should not block."""
+        row = _make_li_row(**{COL_DRIVE_FILE_ID: ""})
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert "LI" in report.approved_channels
+
+
+# ═══════════════════════════════════════════════════════════════
+#  PARTIAL Scenarios with LI
+# ═══════════════════════════════════════════════════════════════
+
+class TestPartialScenariosLI:
+    def test_li_blocked_ig_approved_partial(self, validator_all):
+        """IG+LI: LI blocked (missing URN), IG approved → partial."""
+        row = _make_row(**{
+            COL_NETWORK: "IG+LI",
+            COL_CAPTION_IG: "IG text",
+            COL_CAPTION_LI: "LI text",
+            COL_LI_AUTHOR_URN: "",  # Missing → blocks LI
+        })
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert report.is_partially_approved
+        assert "IG" in report.approved_channels
+        assert "LI" in report.blocked_channels
+
+    def test_li_only_blocked_blocks_row(self, validator_all):
+        """LI-only post with invalid URN → row blocked (no channels can publish)."""
+        row = _make_li_row(**{COL_LI_AUTHOR_URN: "invalid"})
+        report = validator_all.validate(row)
+        assert report.row_blocked
+        assert not report.approved_channels
+
+    def test_ig_fb_gbp_li_with_li_blocked(self, validator_all):
+        """All 4 channels, LI blocked → partial with 3 channels approved."""
+        row = _make_li_row(**{
+            COL_NETWORK: "IG+FB+GBP+LI",
+            COL_CAPTION_IG: "IG text",
+            COL_CAPTION_FB: "FB text",
+            COL_CAPTION_GBP: "GBP text",
+            COL_GOOGLE_LOCATION_ID: "locations/456",
+            COL_GBP_POST_TYPE: "STANDARD",
+            COL_LI_AUTHOR_URN: "",  # Missing → blocks LI
+            COL_DRIVE_FILE_ID: "drive-file-123",
+        })
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert report.is_partially_approved
+        assert set(report.approved_channels) == {"IG", "FB", "GBP"}
+        assert "LI" in report.blocked_channels
+
+    def test_already_posted_li_skipped(self, validator_all):
+        """LI already posted → should not be re-published."""
+        row = _make_li_row(**{
+            COL_NETWORK: "IG+LI",
+            COL_PUBLISHED_CHANNELS: "LI",
+            COL_DRIVE_FILE_ID: "drive-file-123",
+            COL_CAPTION_IG: "IG text",
+        })
+        report = validator_all.validate(row)
+        assert not report.row_blocked
+        assert "IG" in report.approved_channels

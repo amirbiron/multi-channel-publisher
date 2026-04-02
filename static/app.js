@@ -546,6 +546,9 @@ function onChannelChange() {
 function onCtaTypeChange() {
   const ctaType = document.getElementById('form-cta-type').value;
   document.getElementById('cta-url-group').classList.toggle('hidden', !ctaType);
+  if (!ctaType) {
+    document.getElementById('form-cta-url').value = '';
+  }
 }
 
 function toggleManualLocationId() {

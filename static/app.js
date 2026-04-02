@@ -859,6 +859,10 @@ async function savePost() {
     showToast('יש להזין כתובת URL עבור CTA', 'error');
     return;
   }
+  if (hasGBP && !data.cta_type && data.cta_url) {
+    showToast('יש לבחור סוג CTA כאשר מוזנת כתובת URL', 'error');
+    return;
+  }
 
   const btn = document.getElementById('btn-save-post');
   btn.disabled = true;

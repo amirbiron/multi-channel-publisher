@@ -259,9 +259,9 @@ class RowValidator:
             out[key] = val.strip() if isinstance(val, str) else val
 
         # Normalize empty strings to None for optional fields
-        for key in (COL_CAPTION_GBP, COL_CAPTION_IG, COL_CAPTION_FB,
+        for key in (COL_CAPTION_GBP, COL_CAPTION_IG, COL_CAPTION_FB, COL_CAPTION_LI,
                      COL_CTA_TYPE, COL_CTA_URL, COL_GBP_POST_TYPE,
-                     COL_GOOGLE_LOCATION_ID):
+                     COL_GOOGLE_LOCATION_ID, COL_LI_AUTHOR_URN):
             if out.get(key) == "":
                 out[key] = None
 
@@ -357,6 +357,7 @@ class RowValidator:
             COL_CAPTION_IG: "IG",
             COL_CAPTION_FB: "FB",
             COL_CAPTION_GBP: "GBP",
+            COL_CAPTION_LI: "LI",
         }
         for cap_col, ch_id in _caption_to_channel.items():
             if out.get(cap_col) is None:

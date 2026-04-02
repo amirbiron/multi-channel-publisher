@@ -115,12 +115,18 @@ class LinkedInOAuthManager:
         try:
             self._refresh()
             self._direct_mode = False
-        except LinkedInOAuthError:
-            if self._direct_mode is None:
-                # First attempt failed — fall back to direct access token mode
+        except LinkedInOAuthError as exc:
+            # Only fall back to direct mode on auth errors (400/401).
+            # Transient server errors (5xx) should propagate so the
+            # caller can retry later without permanently locking into
+            # the wrong mode.
+            is_auth_error = exc.status_code in (400, 401)
+            if self._direct_mode is None and is_auth_error:
                 logger.info(
-                    "LinkedIn refresh token flow failed — using LI_REFRESH_TOKEN "
-                    "as direct access token (Share on LinkedIn mode)"
+                    "LinkedIn refresh token flow failed (%s) — using "
+                    "LI_REFRESH_TOKEN as direct access token "
+                    "(Share on LinkedIn mode)",
+                    exc.status_code,
                 )
                 self._direct_mode = True
                 self._use_direct_token()
@@ -158,7 +164,8 @@ class LinkedInOAuthManager:
                 resp.text[:500],
             )
             raise LinkedInOAuthError(
-                f"Token refresh failed ({resp.status_code}): {resp.text[:300]}"
+                f"Token refresh failed ({resp.status_code}): {resp.text[:300]}",
+                status_code=resp.status_code,
             )
 
         data = resp.json()
@@ -170,6 +177,10 @@ class LinkedInOAuthManager:
 
 class LinkedInOAuthError(Exception):
     """Raised when the LinkedIn OAuth token refresh request fails."""
+
+    def __init__(self, message: str, status_code: int = 0) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 # -- module-level singleton (lazy) ------------------------------------

@@ -127,15 +127,18 @@ class TestTokenRefresh:
         assert token == "rtoken"
 
     @patch("channels.linkedin_auth.requests.post")
-    def test_refresh_500_falls_back_to_direct_mode(self, mock_post):
+    def test_refresh_500_raises_instead_of_direct_mode(self, mock_post):
+        """Transient server errors (5xx) should NOT trigger direct mode."""
         mock_resp = MagicMock()
         mock_resp.status_code = 500
         mock_resp.text = "Internal Server Error"
         mock_post.return_value = mock_resp
 
         mgr = LinkedInOAuthManager("cid", "csecret", "rtoken")
-        token = mgr.get_access_token()
-        assert token == "rtoken"
+        with pytest.raises(LinkedInOAuthError):
+            mgr.get_access_token()
+        # direct_mode should remain undecided
+        assert mgr._direct_mode is None
 
 
 # ═══════════════════════════════════════════════════════════════

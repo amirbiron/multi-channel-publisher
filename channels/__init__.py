@@ -8,6 +8,7 @@ from channels.meta_instagram import InstagramChannel
 from channels.meta_facebook import FacebookChannel
 from channels.google_business import GoogleBusinessChannel
 from channels.linkedin import LinkedInChannel
+from channels.linkedin_auth import LinkedInOAuthManager, LinkedInOAuthError
 
 __all__ = [
     "BaseChannel",
@@ -17,6 +18,8 @@ __all__ = [
     "FacebookChannel",
     "GoogleBusinessChannel",
     "LinkedInChannel",
+    "LinkedInOAuthManager",
+    "LinkedInOAuthError",
 ]
 
 # Feature flags — set to "true" to activate

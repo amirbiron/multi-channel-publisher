@@ -11,12 +11,17 @@ OAuth 2.0 three-legged flow with permission: w_member_social.
 from __future__ import annotations
 
 import logging
-import threading
-import time
+import re
 
 import requests
 
 from channels.base import BaseChannel, PublishResult
+from channels.linkedin_auth import (
+    LinkedInOAuthManager,
+    LinkedInOAuthError,
+    get_li_oauth_manager,
+    reset_li_oauth_manager,
+)
 from config_constants import COL_CAPTION_LI, COL_LI_AUTHOR_URN
 
 logger = logging.getLogger(__name__)
@@ -26,139 +31,11 @@ _LI_API_BASE = "https://api.linkedin.com/rest"
 # LinkedIn API version header (required by Community Management API)
 _LI_API_VERSION = "202401"
 
+# LinkedIn caption maximum length
+_MAX_CAPTION_LENGTH = 3000
 
-# Refresh the token 5 minutes before it actually expires
-_EXPIRY_MARGIN_SECONDS = 300
-
-
-class LinkedInOAuthManager:
-    """
-    Manages LinkedIn OAuth 2.0 access tokens using a refresh token.
-
-    LinkedIn's three-legged OAuth flow issues refresh tokens that can be
-    exchanged for short-lived access tokens.
-    """
-
-    _TOKEN_ENDPOINT = "https://www.linkedin.com/oauth/v2/accessToken"
-
-    def __init__(
-        self,
-        client_id: str,
-        client_secret: str,
-        refresh_token: str,
-    ) -> None:
-        if not all([client_id, client_secret, refresh_token]):
-            raise ValueError(
-                "LinkedIn OAuth credentials incomplete. "
-                "Set LI_OAUTH_CLIENT_ID, LI_OAUTH_CLIENT_SECRET, and LI_REFRESH_TOKEN."
-            )
-        self._client_id = client_id
-        self._client_secret = client_secret
-        self._refresh_token = refresh_token
-        self._access_token: str | None = None
-        self._expires_at: float = 0.0  # epoch seconds
-        self._lock = threading.Lock()
-
-    def get_access_token(self) -> str:
-        """Return a valid access token, refreshing if necessary."""
-        if self._is_token_valid():
-            return self._access_token  # type: ignore[return-value]
-
-        with self._lock:
-            # Double-check after acquiring lock
-            if self._is_token_valid():
-                return self._access_token  # type: ignore[return-value]
-            self._refresh()
-            return self._access_token  # type: ignore[return-value]
-
-    def get_auth_headers(self) -> dict[str, str]:
-        """Return headers required for LinkedIn REST API calls."""
-        return {
-            "Authorization": f"Bearer {self.get_access_token()}",
-            "LinkedIn-Version": _LI_API_VERSION,
-            "Content-Type": "application/json",
-            "X-Restli-Protocol-Version": "2.0.0",
-        }
-
-    def force_refresh(self) -> str:
-        """Force a token refresh. Returns new token."""
-        with self._lock:
-            self._refresh()
-            return self._access_token  # type: ignore[return-value]
-
-    def _is_token_valid(self) -> bool:
-        return (
-            self._access_token is not None
-            and time.time() < self._expires_at - _EXPIRY_MARGIN_SECONDS
-        )
-
-    def _refresh(self) -> None:
-        """Exchange the refresh token for a new access token."""
-        logger.info("Refreshing LinkedIn OAuth access token ...")
-
-        resp = requests.post(
-            self._TOKEN_ENDPOINT,
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": self._refresh_token,
-                "client_id": self._client_id,
-                "client_secret": self._client_secret,
-            },
-            timeout=30,
-        )
-
-        if resp.status_code != 200:
-            logger.error(
-                "LinkedIn OAuth token refresh failed: %s %s",
-                resp.status_code,
-                resp.text[:500],
-            )
-            raise LinkedInOAuthError(
-                f"Token refresh failed ({resp.status_code}): {resp.text[:300]}"
-            )
-
-        data = resp.json()
-        self._access_token = data["access_token"]
-        expires_in = int(data.get("expires_in", 3600))
-        self._expires_at = time.time() + expires_in
-        logger.info("LinkedIn OAuth token refreshed, expires in %ds", expires_in)
-
-
-class LinkedInOAuthError(Exception):
-    """Raised when the LinkedIn OAuth token refresh request fails."""
-
-
-# ── module-level singleton (lazy) ────────────────────────────
-
-_manager: LinkedInOAuthManager | None = None
-
-
-def get_li_oauth_manager() -> LinkedInOAuthManager:
-    """
-    Return the module-level LinkedInOAuthManager singleton.
-
-    Lazily created on first call so that missing env vars don't
-    crash the process at import time.
-    """
-    global _manager
-    if _manager is None:
-        from config import (
-            LI_OAUTH_CLIENT_ID,
-            LI_OAUTH_CLIENT_SECRET,
-            LI_REFRESH_TOKEN,
-        )
-        _manager = LinkedInOAuthManager(
-            client_id=LI_OAUTH_CLIENT_ID,
-            client_secret=LI_OAUTH_CLIENT_SECRET,
-            refresh_token=LI_REFRESH_TOKEN,
-        )
-    return _manager
-
-
-def reset_li_oauth_manager() -> None:
-    """Reset the singleton (useful for tests)."""
-    global _manager
-    _manager = None
+# Valid URN patterns for LinkedIn author
+_URN_PATTERN = re.compile(r"^urn:li:(person|organization):[A-Za-z0-9_-]+$")
 
 
 class LinkedInChannel(BaseChannel):
@@ -168,20 +45,39 @@ class LinkedInChannel(BaseChannel):
     SUPPORTED_MEDIA_TYPES = ("image", "video", "none")
     CAPTION_COLUMN = COL_CAPTION_LI
 
+    # -- validation ---------------------------------------------------
+
     def validate(self, post_data: dict) -> list[str]:
-        errors = []
+        errors: list[str] = []
 
         # Author URN is required (personal profile or organization page)
         author_urn = post_data.get(COL_LI_AUTHOR_URN, "")
         if not author_urn:
             errors.append("Missing li_author_urn (required for LinkedIn)")
+        elif not _URN_PATTERN.match(author_urn):
+            errors.append(
+                f"Invalid li_author_urn format: '{author_urn}'. "
+                f"Expected urn:li:person:{{id}} or urn:li:organization:{{id}}"
+            )
 
-        # Caption is required
+        # Must have caption or media (not an empty post)
         caption = self.get_caption(post_data)
-        if not caption:
-            errors.append("Missing caption for LinkedIn")
+        cloud_urls: list[str] = post_data.get("cloud_urls", [])
+        has_media = bool(cloud_urls)
+
+        if not caption and not has_media:
+            errors.append("Missing caption and media for LinkedIn (post cannot be empty)")
+
+        # Caption length check
+        if caption and len(caption) > _MAX_CAPTION_LENGTH:
+            errors.append(
+                f"LinkedIn caption too long ({len(caption)} chars). "
+                f"Maximum is {_MAX_CAPTION_LENGTH} characters."
+            )
 
         return errors
+
+    # -- publishing ---------------------------------------------------
 
     def publish(self, post_data: dict) -> PublishResult:
         author_urn = post_data[COL_LI_AUTHOR_URN]
@@ -189,38 +85,49 @@ class LinkedInChannel(BaseChannel):
         cloud_urls: list[str] = post_data.get("cloud_urls", [])
         mime_types: list[str] = post_data.get("mime_types", [])
 
-        # Build the post body per LinkedIn Community Management API
-        body: dict = {
-            "author": author_urn,
-            "lifecycleState": "PUBLISHED",
-            "visibility": "PUBLIC",
-            "commentary": caption,
-            "distribution": {
-                "feedDistribution": "MAIN_FEED",
-            },
-        }
-
-        # Add media if available (image or video use the same structure)
-        if cloud_urls and mime_types:
-            first_mime = mime_types[0]
-            if first_mime.startswith("image/") or first_mime.startswith("video/"):
-                body["content"] = {
-                    "media": [
-                        {
-                            "title": "",
-                            "id": cloud_urls[0],
-                        },
-                    ],
-                }
-
-        url = f"{_LI_API_BASE}/posts"
-
         try:
             auth = get_li_oauth_manager()
+            headers = auth.get_auth_headers()
+
+            # Determine media type and upload if needed
+            media_urn: str | None = None
+            if cloud_urls and mime_types:
+                first_mime = mime_types[0]
+                first_url = cloud_urls[0]
+
+                if first_mime.startswith("image/"):
+                    media_urn = self._upload_image(
+                        author_urn, first_url, headers
+                    )
+                elif first_mime.startswith("video/"):
+                    media_urn = self._upload_video(
+                        author_urn, first_url, headers
+                    )
+
+            # Build the post body per LinkedIn Community Management API
+            body: dict = {
+                "author": author_urn,
+                "lifecycleState": "PUBLISHED",
+                "visibility": "PUBLIC",
+                "commentary": caption,
+                "distribution": {
+                    "feedDistribution": "MAIN_FEED",
+                },
+            }
+
+            # Attach media if uploaded
+            if media_urn:
+                body["content"] = {
+                    "media": {
+                        "id": media_urn,
+                    },
+                }
+
+            url = f"{_LI_API_BASE}/posts"
             resp = requests.post(
                 url,
                 json=body,
-                headers=auth.get_auth_headers(),
+                headers=headers,
                 timeout=30,
             )
             resp.raise_for_status()
@@ -240,6 +147,7 @@ class LinkedInChannel(BaseChannel):
             )
 
         except Exception as exc:
+            error_code = self._classify_linkedin_error(exc)
             raw = None
             if hasattr(exc, "response") and exc.response is not None:
                 try:
@@ -248,7 +156,132 @@ class LinkedInChannel(BaseChannel):
                     pass
             return self._make_result(
                 success=False,
-                error_code=self.classify_error(exc),
+                error_code=error_code,
                 error_message=str(exc)[:500],
                 raw_response=raw,
             )
+
+    # -- image upload -------------------------------------------------
+
+    def _upload_image(
+        self, author_urn: str, image_url: str, headers: dict[str, str]
+    ) -> str:
+        """
+        Upload an image to LinkedIn via the Images API.
+
+        1. Initialize upload via POST /rest/images?action=initializeUpload
+        2. Upload binary to the provided uploadUrl
+        3. Return the image URN for use in the post
+        """
+        # Step 1: Initialize upload
+        init_resp = requests.post(
+            f"{_LI_API_BASE}/images?action=initializeUpload",
+            json={
+                "initializeUploadRequest": {
+                    "owner": author_urn,
+                }
+            },
+            headers=headers,
+            timeout=30,
+        )
+        init_resp.raise_for_status()
+        init_data = init_resp.json()
+
+        upload_url = init_data["value"]["uploadUrl"]
+        image_urn = init_data["value"]["image"]
+
+        # Step 2: Download the image from cloud storage and upload to LinkedIn
+        img_data = requests.get(image_url, timeout=60)
+        img_data.raise_for_status()
+
+        upload_headers = {
+            "Authorization": headers["Authorization"],
+        }
+        upload_resp = requests.put(
+            upload_url,
+            data=img_data.content,
+            headers=upload_headers,
+            timeout=120,
+        )
+        upload_resp.raise_for_status()
+
+        logger.info("LinkedIn image uploaded: %s", image_urn)
+        return image_urn
+
+    # -- video upload -------------------------------------------------
+
+    def _upload_video(
+        self, author_urn: str, video_url: str, headers: dict[str, str]
+    ) -> str:
+        """
+        Upload a video to LinkedIn via the Videos API.
+
+        1. Initialize upload via POST /rest/videos?action=initializeUpload
+        2. Upload binary to the provided uploadUrl (single chunk for small files)
+        3. Return the video URN for use in the post
+        """
+        # Step 1: Download video first to know the file size
+        vid_data = requests.get(video_url, timeout=120)
+        vid_data.raise_for_status()
+        file_size = len(vid_data.content)
+
+        # Step 2: Initialize upload
+        init_resp = requests.post(
+            f"{_LI_API_BASE}/videos?action=initializeUpload",
+            json={
+                "initializeUploadRequest": {
+                    "owner": author_urn,
+                    "fileSizeBytes": file_size,
+                }
+            },
+            headers=headers,
+            timeout=30,
+        )
+        init_resp.raise_for_status()
+        init_data = init_resp.json()
+
+        video_urn = init_data["value"]["video"]
+        upload_instructions = init_data["value"]["uploadInstructions"]
+
+        # Step 3: Upload chunks (usually single chunk for small files)
+        upload_headers = {
+            "Authorization": headers["Authorization"],
+        }
+        for instruction in upload_instructions:
+            upload_url = instruction["uploadUrl"]
+            first_byte = instruction.get("firstByte", 0)
+            last_byte = instruction.get("lastByte", file_size - 1)
+
+            chunk = vid_data.content[first_byte : last_byte + 1]
+            upload_resp = requests.put(
+                upload_url,
+                data=chunk,
+                headers=upload_headers,
+                timeout=300,
+            )
+            upload_resp.raise_for_status()
+
+        logger.info("LinkedIn video uploaded: %s (%d bytes)", video_urn, file_size)
+        return video_urn
+
+    # -- error classification -----------------------------------------
+
+    @staticmethod
+    def _classify_linkedin_error(exc: Exception) -> str:
+        """Classify LinkedIn API errors into specific error codes."""
+        if "timeout" in str(exc).lower():
+            return "timeout"
+
+        if hasattr(exc, "response") and exc.response is not None:
+            status = exc.response.status_code
+            if status == 401:
+                return "auth_failure"
+            if status == 422:
+                return "validation_error"
+            if status == 429:
+                return "rate_limit"
+            if 500 <= status < 600:
+                return f"http_{status}"
+            return f"http_{status}"
+
+        return "api_error"

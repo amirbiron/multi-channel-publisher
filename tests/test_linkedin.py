@@ -124,6 +124,28 @@ class TestValidation:
         }
         assert channel.validate(data) == []
 
+    def test_unsupported_mime_type(self, channel):
+        """Unsupported MIME types (e.g. PDF) should be rejected."""
+        data = {
+            "li_author_urn": "urn:li:person:abc123",
+            "cloud_urls": ["https://example.com/doc.pdf"],
+            "mime_types": ["application/pdf"],
+        }
+        errors = channel.validate(data)
+        assert any("Unsupported media type" in e for e in errors)
+        # Also flagged as empty post since PDF isn't valid media
+        assert any("caption" in e.lower() for e in errors)
+
+    def test_cloud_urls_without_mime_types(self, channel):
+        """cloud_urls with no mime_types should require caption."""
+        data = {
+            "li_author_urn": "urn:li:person:abc123",
+            "cloud_urls": ["https://example.com/file"],
+            "mime_types": [],
+        }
+        errors = channel.validate(data)
+        assert any("caption" in e.lower() for e in errors)
+
 
 # ===================================================================
 #  Publish — text only

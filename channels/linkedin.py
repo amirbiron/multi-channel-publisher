@@ -52,13 +52,32 @@ class LinkedInChannel(BaseChannel):
                 f"Expected urn:li:person:{{id}} or urn:li:organization:{{id}}"
             )
 
-        # Must have caption or media (not an empty post)
+        # Must have caption or supported media (not an empty post)
         caption = self.get_caption(post_data)
         cloud_urls: list[str] = post_data.get("cloud_urls", [])
-        has_media = bool(cloud_urls)
+        mime_types: list[str] = post_data.get("mime_types", [])
 
-        if not caption and not has_media:
+        # Only image/* and video/* are supported by LinkedIn
+        has_supported_media = bool(
+            cloud_urls
+            and mime_types
+            and any(
+                m.startswith("image/") or m.startswith("video/")
+                for m in mime_types
+            )
+        )
+
+        if not caption and not has_supported_media:
             errors.append("Missing caption and media for LinkedIn (post cannot be empty)")
+
+        # Warn about unsupported MIME types
+        if cloud_urls and mime_types:
+            for mt in mime_types:
+                if mt and not mt.startswith("image/") and not mt.startswith("video/"):
+                    errors.append(
+                        f"Unsupported media type '{mt}' for LinkedIn. "
+                        f"Only image/* and video/* are supported."
+                    )
 
         # Caption length check
         if caption and len(caption) > _MAX_CAPTION_LENGTH:

@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
+from media_processor import LI_CAPTION_MAX_LENGTH
+
 from config_constants import (
     COL_CAPTION,
     COL_CAPTION_FB,
@@ -616,7 +618,6 @@ class RowValidator:
         return ChannelValidationResult(channel="GBP", approved=not blocked, issues=issues)
 
     _LI_URN_PATTERN = re.compile(r"^urn:li:(person|organization):[A-Za-z0-9_-]+$")
-    _LI_CAPTION_MAX_LENGTH = 3000
 
     def _validate_li(self, n: dict) -> ChannelValidationResult:
         issues: list[ValidationIssue] = []
@@ -653,12 +654,12 @@ class RowValidator:
                 field=COL_CAPTION_LI,
                 channel="LI",
             ))
-        elif len(caption) > self._LI_CAPTION_MAX_LENGTH:
+        elif len(caption) > LI_CAPTION_MAX_LENGTH:
             issues.append(ValidationIssue(
                 code=ErrorCode.LI_CAPTION_TOO_LONG,
                 message=(
                     f"LinkedIn caption too long — {len(caption)} characters "
-                    f"(maximum {self._LI_CAPTION_MAX_LENGTH})"
+                    f"(maximum {LI_CAPTION_MAX_LENGTH})"
                 ),
                 severity="CHANNEL_BLOCK",
                 field=COL_CAPTION_LI,

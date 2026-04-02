@@ -55,7 +55,7 @@ IG_REELS_VIDEO_MAX_RATIO = 10.0    # per Meta API docs
 LI_IMAGE_MAX_SIZE = 10_485_760      # 10 MB
 LI_VIDEO_MAX_SIZE = 209_715_200     # 200 MB
 LI_VIDEO_MAX_DURATION = 600         # 10 minutes
-LI_CAPTION_MAX_LENGTH = 3000
+LI_CAPTION_MAX_LENGTH = 3000        # used by validator.py
 
 
 # ─── Network helpers ─────────────────────────────────────────

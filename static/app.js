@@ -546,6 +546,9 @@ function onChannelChange() {
 function onCtaTypeChange() {
   const ctaType = document.getElementById('form-cta-type').value;
   document.getElementById('cta-url-group').classList.toggle('hidden', !ctaType);
+  if (!ctaType) {
+    document.getElementById('form-cta-url').value = '';
+  }
 }
 
 function toggleManualLocationId() {
@@ -844,12 +847,23 @@ async function savePost() {
     showToast('יש לבחור תאריך ושעת פרסום', 'error');
     return;
   }
-  if (!data.drive_file_id) {
+  // GBP supports text-only posts (no media required).
+  // Only require media when at least one non-GBP channel is selected.
+  const needsMedia = channels.some(ch => ch !== 'GBP');
+  if (needsMedia && !data.drive_file_id) {
     showToast('יש לבחור קובץ מדיה', 'error');
     return;
   }
   if (hasGBP && !googleLocationId) {
     showToast('יש לבחור מיקום Google עבור GBP', 'error');
+    return;
+  }
+  if (hasGBP && data.cta_type && !data.cta_url) {
+    showToast('יש להזין כתובת URL עבור CTA', 'error');
+    return;
+  }
+  if (hasGBP && !data.cta_type && data.cta_url) {
+    showToast('יש לבחור סוג CTA כאשר מוזנת כתובת URL', 'error');
     return;
   }
 

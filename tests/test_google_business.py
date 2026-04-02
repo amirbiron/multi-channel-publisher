@@ -106,6 +106,19 @@ class TestValidation:
         assert any("video/mp4" in e for e in errors)
         assert any("does not support video" in e.lower() for e in errors)
 
+    def test_cta_type_without_url_ok_at_channel_level(self, channel):
+        """Channel validate() does not check CTA — that's done by the validator."""
+        data = {
+            "google_location_id": "locations/123",
+            "caption_gbp": "Hello",
+            "cta_type": "LEARN_MORE",
+            # no cta_url
+        }
+        # Channel-level validation doesn't enforce CTA consistency
+        # (validator.py handles this at a higher level)
+        errors = channel.validate(data)
+        assert not any("cta" in e.lower() for e in errors)
+
 
 # ═══════════════════════════════════════════════════════════════
 #  Publish — text only
@@ -283,6 +296,44 @@ class TestPublishErrors:
 
         assert result.success is False
         assert result.error_code == "timeout"
+
+    @patch("channels.google_auth.get_oauth_manager")
+    @patch("channels.google_business.requests.post")
+    def test_auth_error_401(self, mock_post, mock_auth, channel):
+        mock_auth.return_value.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_resp.text = "Unauthorized"
+        mock_resp.raise_for_status.side_effect = requests.HTTPError(response=mock_resp)
+        mock_post.return_value = mock_resp
+
+        data = {
+            "google_location_id": "locations/456",
+            "caption_gbp": "Will fail auth",
+        }
+
+        with patch("config.GBP_ACCOUNT_ID", "accounts/123"):
+            result = channel.publish(data)
+
+        assert result.success is False
+        assert result.error_code == "http_401"
+
+    @patch("channels.google_auth.get_oauth_manager")
+    @patch("channels.google_business.requests.post")
+    def test_connection_error(self, mock_post, mock_auth, channel):
+        mock_auth.return_value.get_auth_headers.return_value = {"Authorization": "Bearer fake"}
+        mock_post.side_effect = requests.ConnectionError("Connection refused")
+
+        data = {
+            "google_location_id": "locations/456",
+            "caption_gbp": "Will fail connect",
+        }
+
+        with patch("config.GBP_ACCOUNT_ID", "accounts/123"):
+            result = channel.publish(data)
+
+        assert result.success is False
+        assert result.error_message is not None
 
 
 # ═══════════════════════════════════════════════════════════════

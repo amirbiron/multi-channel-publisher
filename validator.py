@@ -131,6 +131,10 @@ class ErrorCode:
     FB_MEDIA_MISSING = "FB_MEDIA_MISSING"
     FB_CAPTION_MISSING = "FB_CAPTION_MISSING"
 
+    # Channel: LI
+    LI_AUTHOR_URN_MISSING = "LI_AUTHOR_URN_MISSING"
+    LI_CAPTION_MISSING = "LI_CAPTION_MISSING"
+
     # Network expansion
     NETWORK_ALL_EXPANDED = "NETWORK_ALL_EXPANDED"
     NETWORK_DUPLICATE_CHANNELS = "NETWORK_DUPLICATE_CHANNELS"
@@ -443,7 +447,7 @@ class RowValidator:
         # Drive file IDs (media)
         # GBP supports text-only posts (no media required).
         # Only block the row if ALL target channels require media.
-        _CHANNELS_SUPPORTING_TEXT_ONLY = {"GBP"}
+        _CHANNELS_SUPPORTING_TEXT_ONLY = {"GBP", "LI"}
         drive_ids: list[str] = normalized.get("_drive_file_ids", [])
         if not drive_ids:
             all_need_media = all(
@@ -493,6 +497,7 @@ class RowValidator:
             "IG": self._validate_ig,
             "FB": self._validate_fb,
             "GBP": self._validate_gbp,
+            "LI": self._validate_li,
         }
         validator_fn = dispatch.get(channel_id)
         if validator_fn is None:
@@ -606,6 +611,34 @@ class RowValidator:
         blocked = any(i.severity == "CHANNEL_BLOCK" for i in issues)
         return ChannelValidationResult(channel="GBP", approved=not blocked, issues=issues)
 
+    def _validate_li(self, n: dict) -> ChannelValidationResult:
+        issues: list[ValidationIssue] = []
+
+        # Author URN is required
+        author_urn = n.get(COL_LI_AUTHOR_URN)
+        if not author_urn:
+            issues.append(ValidationIssue(
+                code=ErrorCode.LI_AUTHOR_URN_MISSING,
+                message="Missing li_author_urn (required for LinkedIn)",
+                severity="CHANNEL_BLOCK",
+                field=COL_LI_AUTHOR_URN,
+                channel="LI",
+            ))
+
+        # Caption: channel-specific → generic
+        caption = n.get(COL_CAPTION_LI) or n.get(COL_CAPTION) or ""
+        if not caption:
+            issues.append(ValidationIssue(
+                code=ErrorCode.LI_CAPTION_MISSING,
+                message="Missing caption for LinkedIn (no caption_li and no generic caption)",
+                severity="CHANNEL_BLOCK",
+                field=COL_CAPTION_LI,
+                channel="LI",
+            ))
+
+        blocked = any(i.severity == "CHANNEL_BLOCK" for i in issues)
+        return ChannelValidationResult(channel="LI", approved=not blocked, issues=issues)
+
     # ─── Phase 4: Aggregation ────────────────────────────────
 
     def _aggregate(
@@ -672,6 +705,8 @@ class RowValidator:
             COL_CAPTION_IG: normalized.get(COL_CAPTION_IG) or "",
             COL_CAPTION_FB: normalized.get(COL_CAPTION_FB) or "",
             COL_CAPTION_GBP: normalized.get(COL_CAPTION_GBP) or "",
+            COL_CAPTION_LI: normalized.get(COL_CAPTION_LI) or "",
+            COL_LI_AUTHOR_URN: normalized.get(COL_LI_AUTHOR_URN) or "",
             COL_GOOGLE_LOCATION_ID: normalized.get(COL_GOOGLE_LOCATION_ID) or "",
             COL_GBP_POST_TYPE: normalized.get(COL_GBP_POST_TYPE) or "",
             COL_CTA_TYPE: normalized.get(COL_CTA_TYPE) or "",

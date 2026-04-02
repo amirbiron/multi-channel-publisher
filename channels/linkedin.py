@@ -11,6 +11,8 @@ OAuth 2.0 three-legged flow with permission: w_member_social.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 
 import requests
 
@@ -23,6 +25,10 @@ _LI_API_BASE = "https://api.linkedin.com/rest"
 
 # LinkedIn API version header (required by Community Management API)
 _LI_API_VERSION = "202401"
+
+
+# Refresh the token 5 minutes before it actually expires
+_EXPIRY_MARGIN_SECONDS = 300
 
 
 class LinkedInOAuthManager:
@@ -50,12 +56,20 @@ class LinkedInOAuthManager:
         self._client_secret = client_secret
         self._refresh_token = refresh_token
         self._access_token: str | None = None
+        self._expires_at: float = 0.0  # epoch seconds
+        self._lock = threading.Lock()
 
     def get_access_token(self) -> str:
         """Return a valid access token, refreshing if necessary."""
-        if self._access_token is None:
+        if self._is_token_valid():
+            return self._access_token  # type: ignore[return-value]
+
+        with self._lock:
+            # Double-check after acquiring lock
+            if self._is_token_valid():
+                return self._access_token  # type: ignore[return-value]
             self._refresh()
-        return self._access_token  # type: ignore[return-value]
+            return self._access_token  # type: ignore[return-value]
 
     def get_auth_headers(self) -> dict[str, str]:
         """Return headers required for LinkedIn REST API calls."""
@@ -68,8 +82,15 @@ class LinkedInOAuthManager:
 
     def force_refresh(self) -> str:
         """Force a token refresh. Returns new token."""
-        self._refresh()
-        return self._access_token  # type: ignore[return-value]
+        with self._lock:
+            self._refresh()
+            return self._access_token  # type: ignore[return-value]
+
+    def _is_token_valid(self) -> bool:
+        return (
+            self._access_token is not None
+            and time.time() < self._expires_at - _EXPIRY_MARGIN_SECONDS
+        )
 
     def _refresh(self) -> None:
         """Exchange the refresh token for a new access token."""
@@ -98,7 +119,9 @@ class LinkedInOAuthManager:
 
         data = resp.json()
         self._access_token = data["access_token"]
-        logger.info("LinkedIn OAuth token refreshed successfully")
+        expires_in = int(data.get("expires_in", 3600))
+        self._expires_at = time.time() + expires_in
+        logger.info("LinkedIn OAuth token refreshed, expires in %ds", expires_in)
 
 
 class LinkedInOAuthError(Exception):
@@ -177,17 +200,10 @@ class LinkedInChannel(BaseChannel):
             },
         }
 
-        # Add media if available
+        # Add media if available (image or video use the same structure)
         if cloud_urls and mime_types:
             first_mime = mime_types[0]
-            if first_mime.startswith("image/"):
-                body["content"] = {
-                    "media": {
-                        "title": "",
-                        "id": cloud_urls[0],
-                    },
-                }
-            elif first_mime.startswith("video/"):
+            if first_mime.startswith("image/") or first_mime.startswith("video/"):
                 body["content"] = {
                     "media": {
                         "title": "",

@@ -297,9 +297,8 @@ class LinkedInChannel(BaseChannel):
     @staticmethod
     def _classify_linkedin_error(exc: Exception) -> str:
         """Classify LinkedIn API errors into specific error codes."""
-        if "timeout" in str(exc).lower():
-            return "timeout"
-
+        # Check HTTP status code first (before string matching, since
+        # e.g. a 504 message contains "timeout" but should map to http_504)
         if hasattr(exc, "response") and exc.response is not None:
             status = exc.response.status_code
             if status == 401:
@@ -309,5 +308,8 @@ class LinkedInChannel(BaseChannel):
             if status == 429:
                 return "rate_limit"
             return f"http_{status}"
+
+        if "timeout" in str(exc).lower():
+            return "timeout"
 
         return "api_error"

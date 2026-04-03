@@ -18,6 +18,7 @@ from config_constants import (
     COL_GBP_POST_TYPE,
     COL_CTA_TYPE,
     COL_CTA_URL,
+    COL_HASHTAGS,
     GBP_POST_TYPE_STANDARD,
 )
 
@@ -74,6 +75,10 @@ class GoogleBusinessChannel(BaseChannel):
 
         location_id = post_data[COL_GOOGLE_LOCATION_ID]
         caption = self.get_caption(post_data)
+        # For GBP, hashtags are appended to the caption
+        hashtags = (post_data.get(COL_HASHTAGS) or "").strip()
+        if hashtags:
+            caption = f"{caption}\n\n{hashtags}" if caption else hashtags
         cloud_urls: list[str] = post_data.get("cloud_urls", [])
         mime_types: list[str] = post_data.get("mime_types", [])
 

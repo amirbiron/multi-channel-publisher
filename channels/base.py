@@ -11,6 +11,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from config_constants import COL_FIRST_COMMENT, COL_HASHTAGS
+
 logger = logging.getLogger(__name__)
 
 
@@ -103,6 +105,18 @@ class BaseChannel:
         if hasattr(exc, "response") and exc.response is not None:
             return f"http_{exc.response.status_code}"
         return "api_error"
+
+    @staticmethod
+    def build_first_comment(post_data: dict) -> str:
+        """Combine first_comment and hashtags into a single comment text."""
+        parts = []
+        comment = (post_data.get(COL_FIRST_COMMENT) or "").strip()
+        hashtags = (post_data.get(COL_HASHTAGS) or "").strip()
+        if comment:
+            parts.append(comment)
+        if hashtags:
+            parts.append(hashtags)
+        return "\n\n".join(parts)
 
     # Error codes considered retryable (transient / infrastructure)
     _RETRYABLE_ERROR_CODES = frozenset({

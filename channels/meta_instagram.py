@@ -48,6 +48,9 @@ class InstagramChannel(BaseChannel):
         post_type: str = post_data.get("post_type", "FEED")
         is_carousel = len(cloud_urls) > 1
 
+        # Build first comment text (hashtags go to first comment on IG)
+        first_comment = self.build_first_comment(post_data)
+
         try:
             if is_carousel:
                 platform_id = ig_publish_carousel(cloud_urls, caption, mime_types)
@@ -55,6 +58,11 @@ class InstagramChannel(BaseChannel):
                 platform_id = ig_publish_feed(
                     cloud_urls[0], caption, mime_types[0], post_type,
                 )
+
+            # Post first comment if provided
+            if first_comment:
+                self._post_first_comment(platform_id, first_comment)
+
             return self._make_result(success=True, platform_post_id=platform_id)
         except Exception as exc:
             raw = None
@@ -69,3 +77,12 @@ class InstagramChannel(BaseChannel):
                 error_message=str(exc)[:500],
                 raw_response=raw,
             )
+
+    @staticmethod
+    def _post_first_comment(media_id: str, text: str) -> None:
+        """Post first comment, logging errors without failing the publish."""
+        try:
+            from meta_publish import ig_post_comment
+            ig_post_comment(media_id, text)
+        except Exception:
+            logger.warning("Failed to post IG first comment on %s", media_id, exc_info=True)

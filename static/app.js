@@ -700,7 +700,8 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
                          captionGbp = '', captionLi = '', liAuthorUrn = '',
                          gbpPostType = 'STANDARD',
                          googleLocationId = '', ctaType = '', ctaUrl = '',
-                         driveFileId = '', postId = null } = {}) {
+                         driveFileId = '', postId = null,
+                         hashtags = '', firstComment = '' } = {}) {
   editPostId = postId;
   document.getElementById('post-modal-title').textContent = title;
   document.getElementById('form-row-number').value = rowNumber;
@@ -742,6 +743,9 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
     document.getElementById('form-google-location-id-manual').value = '';
     document.getElementById('form-google-location-id-manual').classList.add('hidden');
   }
+
+  document.getElementById('form-hashtags').value = hashtags;
+  document.getElementById('form-first-comment').value = firstComment;
 
   document.getElementById('form-drive-file-id').value = driveFileId;
   document.getElementById('form-drive-file-id-manual').value = '';
@@ -806,6 +810,8 @@ function openEditModal(rowNumber) {
     googleLocationId: post.google_location_id || '',
     ctaType: post.cta_type || '',
     ctaUrl: post.cta_url || '',
+    hashtags: post.hashtags || '',
+    firstComment: post.first_comment || '',
     driveFileId: post.drive_file_id || '',
     postId: post.id || null,
   });
@@ -831,6 +837,8 @@ function duplicatePost(rowNumber) {
     googleLocationId: post.google_location_id || '',
     ctaType: post.cta_type || '',
     ctaUrl: post.cta_url || '',
+    hashtags: post.hashtags || '',
+    firstComment: post.first_comment || '',
     driveFileId: post.drive_file_id || '',
   });
 }
@@ -872,6 +880,8 @@ async function savePost() {
     google_location_id: googleLocationId,
     cta_type: document.getElementById('form-cta-type').value,
     cta_url: document.getElementById('form-cta-url').value,
+    hashtags: document.getElementById('form-hashtags').value,
+    first_comment: document.getElementById('form-first-comment').value,
     drive_file_id: document.getElementById('form-drive-file-id').value,
   };
 
@@ -1453,9 +1463,10 @@ function closeModal(id) {
   document.body.style.overflow = '';
 }
 
-// Close modal on backdrop click
+// Close modal on backdrop click (except post-modal to prevent accidental data loss)
 document.addEventListener('click', (e) => {
   if (e.target.classList.contains('modal-backdrop') && e.target.classList.contains('active')) {
+    if (e.target.id === 'post-modal') return;
     e.target.classList.remove('active');
     document.body.style.overflow = '';
   }
@@ -1470,10 +1481,13 @@ document.addEventListener('keydown', (e) => {
       closeLightbox();
       return;
     }
+    let closedAny = false;
     document.querySelectorAll('.modal-backdrop.active').forEach(el => {
+      if (el.id === 'post-modal') return;
       el.classList.remove('active');
+      closedAny = true;
     });
-    document.body.style.overflow = '';
+    if (closedAny) document.body.style.overflow = '';
   }
 });
 

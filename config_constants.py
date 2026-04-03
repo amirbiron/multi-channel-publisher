@@ -34,6 +34,8 @@ COL_GBP_POST_TYPE = "gbp_post_type"
 COL_CTA_TYPE = "cta_type"
 COL_CTA_URL = "cta_url"
 COL_GOOGLE_LOCATION_ID = "google_location_id"
+COL_HASHTAGS = "hashtags"
+COL_FIRST_COMMENT = "first_comment"
 COL_SOURCE = "source"
 COL_RETRY_COUNT = "retry_count"
 COL_LOCKED_AT = "locked_at"
@@ -123,6 +125,8 @@ SHEET_COLUMNS = [
     COL_CTA_TYPE,
     COL_CTA_URL,
     COL_GOOGLE_LOCATION_ID,
+    COL_HASHTAGS,
+    COL_FIRST_COMMENT,
     COL_DRIVE_FILE_ID,
     COL_CLOUDINARY_URL,
     COL_SOURCE,

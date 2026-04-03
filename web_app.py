@@ -36,6 +36,8 @@ from config_constants import (
     COL_CTA_TYPE,
     COL_CTA_URL,
     COL_GOOGLE_LOCATION_ID,
+    COL_HASHTAGS,
+    COL_FIRST_COMMENT,
     COL_DRIVE_FILE_ID,
     COL_CLOUDINARY_URL,
     COL_SOURCE,
@@ -519,6 +521,7 @@ def api_create_post():
             COL_CAPTION_GBP, COL_CAPTION_LI, COL_LI_AUTHOR_URN,
             COL_GBP_POST_TYPE,
             COL_GOOGLE_LOCATION_ID, COL_CTA_TYPE, COL_CTA_URL,
+            COL_HASHTAGS, COL_FIRST_COMMENT,
             COL_DRIVE_FILE_ID,
         }
 
@@ -614,6 +617,7 @@ def api_update_post(row_number):
             COL_CAPTION_GBP, COL_CAPTION_LI, COL_LI_AUTHOR_URN,
             COL_GBP_POST_TYPE,
             COL_GOOGLE_LOCATION_ID, COL_CTA_TYPE, COL_CTA_URL,
+            COL_HASHTAGS, COL_FIRST_COMMENT,
             COL_DRIVE_FILE_ID,
         }
 

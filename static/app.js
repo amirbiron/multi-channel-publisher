@@ -591,24 +591,27 @@ let _locationRequestId = 0;
 function _setLocationLoading(loading) {
   const icon = document.getElementById('refresh-locations-icon');
   const btn = document.getElementById('btn-refresh-locations');
-  if (loading) {
-    icon.classList.add('spinning');
-    btn.disabled = true;
-  } else {
-    icon.classList.remove('spinning');
-    btn.disabled = false;
+  if (icon && btn) {
+    if (loading) {
+      icon.classList.add('spinning');
+      btn.disabled = true;
+    } else {
+      icon.classList.remove('spinning');
+      btn.disabled = false;
+    }
   }
 }
 
 function _showLocationWarning(message) {
   const warning = document.getElementById('location-warning');
   const text = document.getElementById('location-warning-text');
-  if (message) {
+  if (!warning) return;
+  if (message && text) {
     text.textContent = message;
     warning.classList.remove('hidden');
   } else {
     warning.classList.add('hidden');
-    text.textContent = '';
+    if (text) text.textContent = '';
   }
 }
 

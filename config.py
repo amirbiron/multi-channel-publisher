@@ -60,6 +60,7 @@ GBP_REFRESH_TOKEN = os.environ.get("GBP_REFRESH_TOKEN", "")
 LI_OAUTH_CLIENT_ID = os.environ.get("LI_OAUTH_CLIENT_ID", "")
 LI_OAUTH_CLIENT_SECRET = os.environ.get("LI_OAUTH_CLIENT_SECRET", "")
 LI_REFRESH_TOKEN = os.environ.get("LI_REFRESH_TOKEN", "")
+LI_AUTHOR_URN = os.environ.get("LI_AUTHOR_URN", "")  # e.g. "urn:li:person:ABC123"
 
 # ─── Retry ────────────────────────────────────────────────
 PUBLISH_MAX_RETRIES = int(os.environ.get("PUBLISH_MAX_RETRIES", "3"))

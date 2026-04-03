@@ -38,10 +38,11 @@ class GoogleBusinessChannel(BaseChannel):
     def validate(self, post_data: dict) -> list[str]:
         errors = []
 
-        # google_location_id is required
-        location_id = post_data.get(COL_GOOGLE_LOCATION_ID, "")
+        # google_location_id: from row or env var
+        from config import GBP_DEFAULT_LOCATION_ID
+        location_id = post_data.get(COL_GOOGLE_LOCATION_ID, "") or GBP_DEFAULT_LOCATION_ID
         if not location_id:
-            errors.append("Missing google_location_id (required for GBP)")
+            errors.append("Missing google_location_id (set in row or GBP_DEFAULT_LOCATION_ID env var)")
 
         # gbp_post_type must be STANDARD (MVP)
         gbp_post_type = post_data.get(COL_GBP_POST_TYPE, GBP_POST_TYPE_STANDARD)
@@ -71,9 +72,9 @@ class GoogleBusinessChannel(BaseChannel):
 
     def publish(self, post_data: dict) -> PublishResult:
         from channels.google_auth import get_oauth_manager
-        from config import GBP_ACCOUNT_ID
+        from config import GBP_ACCOUNT_ID, GBP_DEFAULT_LOCATION_ID
 
-        location_id = post_data[COL_GOOGLE_LOCATION_ID]
+        location_id = post_data.get(COL_GOOGLE_LOCATION_ID) or GBP_DEFAULT_LOCATION_ID
         caption = self.get_caption(post_data)
         # For GBP, hashtags are appended to the caption
         hashtags = (post_data.get(COL_HASHTAGS) or "").strip()

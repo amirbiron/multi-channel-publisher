@@ -906,10 +906,7 @@ async function savePost() {
     showToast('יש לבחור קובץ מדיה', 'error');
     return;
   }
-  if (hasGBP && !googleLocationId) {
-    showToast('יש לבחור מיקום Google עבור GBP', 'error');
-    return;
-  }
+  // GBP location_id validated server-side (env var fallback)
   if (hasGBP && data.cta_type && !data.cta_url) {
     showToast('יש להזין כתובת URL עבור CTA', 'error');
     return;

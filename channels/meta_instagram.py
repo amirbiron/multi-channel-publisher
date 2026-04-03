@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from channels.base import BaseChannel, PublishResult
-from config_constants import COL_CAPTION_IG, COL_HASHTAGS, COL_FIRST_COMMENT
+from config_constants import COL_CAPTION_IG
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class InstagramChannel(BaseChannel):
         is_carousel = len(cloud_urls) > 1
 
         # Build first comment text (hashtags go to first comment on IG)
-        first_comment = self._build_first_comment(post_data)
+        first_comment = self.build_first_comment(post_data)
 
         try:
             if is_carousel:
@@ -77,18 +77,6 @@ class InstagramChannel(BaseChannel):
                 error_message=str(exc)[:500],
                 raw_response=raw,
             )
-
-    @staticmethod
-    def _build_first_comment(post_data: dict) -> str:
-        """Combine first_comment and hashtags into a single comment text."""
-        parts = []
-        comment = (post_data.get(COL_FIRST_COMMENT) or "").strip()
-        hashtags = (post_data.get(COL_HASHTAGS) or "").strip()
-        if comment:
-            parts.append(comment)
-        if hashtags:
-            parts.append(hashtags)
-        return "\n\n".join(parts)
 
     @staticmethod
     def _post_first_comment(media_id: str, text: str) -> None:

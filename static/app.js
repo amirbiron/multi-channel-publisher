@@ -1481,11 +1481,13 @@ document.addEventListener('keydown', (e) => {
       closeLightbox();
       return;
     }
+    let closedAny = false;
     document.querySelectorAll('.modal-backdrop.active').forEach(el => {
       if (el.id === 'post-modal') return;
       el.classList.remove('active');
+      closedAny = true;
     });
-    document.body.style.overflow = '';
+    if (closedAny) document.body.style.overflow = '';
   }
 });
 

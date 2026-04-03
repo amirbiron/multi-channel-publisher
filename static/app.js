@@ -906,10 +906,6 @@ async function savePost() {
     showToast('יש לבחור קובץ מדיה', 'error');
     return;
   }
-  if (hasLI && !data.li_author_urn) {
-    showToast('יש להזין LinkedIn Author URN', 'error');
-    return;
-  }
   if (hasGBP && !googleLocationId) {
     showToast('יש לבחור מיקום Google עבור GBP', 'error');
     return;

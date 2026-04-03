@@ -16,7 +16,10 @@ import requests
 
 from channels.base import BaseChannel, PublishResult
 from channels.linkedin_auth import get_li_oauth_manager
-from config_constants import COL_CAPTION_LI, COL_LI_AUTHOR_URN, LI_CAPTION_MAX_LENGTH, LI_URN_PATTERN
+from config_constants import (
+    COL_CAPTION_LI, COL_FIRST_COMMENT, COL_HASHTAGS,
+    COL_LI_AUTHOR_URN, LI_CAPTION_MAX_LENGTH, LI_URN_PATTERN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +149,13 @@ class LinkedInChannel(BaseChannel):
                 raw = resp.json()
             except Exception:
                 raw = {"status": resp.status_code, "headers": dict(resp.headers)}
+
+            # Post first comment (hashtags go to first comment on LinkedIn)
+            first_comment = self._build_first_comment(post_data)
+            if first_comment and platform_post_id:
+                self._post_first_comment(
+                    platform_post_id, author_urn, first_comment, headers,
+                )
 
             return self._make_result(
                 success=True,
@@ -283,6 +293,48 @@ class LinkedInChannel(BaseChannel):
 
         logger.info("LinkedIn video uploaded: %s (%d bytes)", video_urn, file_size)
         return video_urn
+
+    # -- first comment ------------------------------------------------
+
+    @staticmethod
+    def _build_first_comment(post_data: dict) -> str:
+        """Combine first_comment and hashtags into a single comment text."""
+        parts = []
+        comment = (post_data.get(COL_FIRST_COMMENT) or "").strip()
+        hashtags = (post_data.get(COL_HASHTAGS) or "").strip()
+        if comment:
+            parts.append(comment)
+        if hashtags:
+            parts.append(hashtags)
+        return "\n\n".join(parts)
+
+    def _post_first_comment(
+        self,
+        post_id: str,
+        author_urn: str,
+        text: str,
+        headers: dict[str, str],
+    ) -> None:
+        """Post a comment on a LinkedIn post. Logs errors without failing."""
+        try:
+            body = {
+                "actor": author_urn,
+                "object": f"urn:li:activity:{post_id}",
+                "message": {"text": text},
+            }
+            resp = requests.post(
+                f"{_LI_API_BASE}/socialActions/{post_id}/comments",
+                json=body,
+                headers=headers,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            logger.info("LinkedIn first comment posted on %s", post_id)
+        except Exception:
+            logger.warning(
+                "Failed to post LinkedIn first comment on %s",
+                post_id, exc_info=True,
+            )
 
     # -- error classification -----------------------------------------
 

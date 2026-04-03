@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from channels.base import BaseChannel, PublishResult
-from config_constants import COL_CAPTION_FB
+from config_constants import COL_CAPTION_FB, COL_HASHTAGS
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,10 @@ class FacebookChannel(BaseChannel):
         from meta_publish import fb_publish_feed
 
         caption = self.get_caption(post_data)
+        # For FB, hashtags are appended to the caption
+        hashtags = (post_data.get(COL_HASHTAGS) or "").strip()
+        if hashtags:
+            caption = f"{caption}\n\n{hashtags}" if caption else hashtags
         cloud_urls: list[str] = post_data["cloud_urls"]
         mime_types: list[str] = post_data["mime_types"]
         post_type: str = post_data.get("post_type", "FEED")

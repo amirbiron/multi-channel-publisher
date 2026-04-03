@@ -435,3 +435,25 @@ def _fb_upload_unpublished_video(cloud_url: str) -> str:
         resp.raise_for_status()
 
     return resp.json()["id"]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Instagram — First Comment
+# ═══════════════════════════════════════════════════════════════
+
+def ig_post_comment(media_id: str, text: str) -> str:
+    """Post a comment on an Instagram media object. Returns comment ID."""
+    url = f"{META_BASE_URL}/{media_id}/comments"
+    data = {
+        "message": text,
+        "access_token": IG_ACCESS_TOKEN,
+    }
+
+    resp = requests.post(url, data=data, timeout=TIMEOUT_SHORT)
+    if not resp.ok:
+        logger.error("IG comment failed (%s): %s", resp.status_code, resp.text)
+        resp.raise_for_status()
+
+    comment_id = resp.json()["id"]
+    logger.info("IG first comment posted: %s", comment_id)
+    return comment_id

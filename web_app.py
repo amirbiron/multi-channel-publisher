@@ -373,9 +373,10 @@ def _validate_li_fields(data: dict) -> str | None:
     """Return an error message if LinkedIn fields are invalid, or None if OK."""
     network = data.get(COL_NETWORK, "")
     if _network_includes_li(network):
-        author_urn = data.get(COL_LI_AUTHOR_URN, "").strip()
+        from config import LI_AUTHOR_URN
+        author_urn = data.get(COL_LI_AUTHOR_URN, "").strip() or LI_AUTHOR_URN
         if not author_urn:
-            return "li_author_urn is required when LinkedIn is selected"
+            return "li_author_urn is required when LinkedIn is selected (set in form or LI_AUTHOR_URN env var)"
     return None
 
 

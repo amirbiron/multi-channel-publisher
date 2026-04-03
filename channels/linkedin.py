@@ -304,14 +304,17 @@ class LinkedInChannel(BaseChannel):
         headers: dict[str, str],
     ) -> None:
         """Post a comment on a LinkedIn post. Logs errors without failing."""
+        from urllib.parse import quote
+
         try:
+            encoded_id = quote(post_id, safe="")
             body = {
                 "actor": author_urn,
                 "object": post_id,
                 "message": {"text": text},
             }
             resp = requests.post(
-                f"{_LI_API_BASE}/socialActions/{post_id}/comments",
+                f"{_LI_API_BASE}/socialActions/{encoded_id}/comments",
                 json=body,
                 headers=headers,
                 timeout=30,

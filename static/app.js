@@ -576,14 +576,6 @@ function onCtaTypeChange() {
   }
 }
 
-function toggleManualLocationId() {
-  const el = document.getElementById('form-google-location-id-manual');
-  el.classList.toggle('hidden');
-  if (!el.classList.contains('hidden')) {
-    el.focus();
-  }
-}
-
 // GBP location picker was removed — location is set via GBP_DEFAULT_LOCATION_ID env var.
 // Keep stubs so any stray callers don't crash.
 function loadGbpLocations() {}

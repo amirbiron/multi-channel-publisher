@@ -576,124 +576,10 @@ function onCtaTypeChange() {
   }
 }
 
-function toggleManualLocationId() {
-  const el = document.getElementById('form-google-location-id-manual');
-  el.classList.toggle('hidden');
-  if (!el.classList.contains('hidden')) {
-    el.focus();
-  }
-}
-
-// Location loading: use a request counter to handle concurrent calls.
-// Only the latest call applies its result, stale responses are ignored.
-let _locationRequestId = 0;
-
-function _setLocationLoading(loading) {
-  const icon = document.getElementById('refresh-locations-icon');
-  const btn = document.getElementById('btn-refresh-locations');
-  if (loading) {
-    icon.classList.add('spinning');
-    btn.disabled = true;
-  } else {
-    icon.classList.remove('spinning');
-    btn.disabled = false;
-  }
-}
-
-function _showLocationWarning(message) {
-  const warning = document.getElementById('location-warning');
-  const text = document.getElementById('location-warning-text');
-  if (message) {
-    text.textContent = message;
-    warning.classList.remove('hidden');
-  } else {
-    warning.classList.add('hidden');
-    text.textContent = '';
-  }
-}
-
-async function loadGbpLocations(selectLocationId = '', forceRefresh = false) {
-  const requestId = ++_locationRequestId;
-  const select = document.getElementById('form-google-location-id');
-  const manual = document.getElementById('form-google-location-id-manual');
-  _setLocationLoading(true);
-  _showLocationWarning('');
-  try {
-    const url = forceRefresh ? '/api/gbp/locations?refresh=1' : '/api/gbp/locations';
-    const resp = await fetch(url);
-    const data = await resp.json();
-
-    // Stale response — a newer call was made while this one was in flight
-    if (requestId !== _locationRequestId) return;
-
-    if (data.error || !data.locations) {
-      select.innerHTML = '<option value="">בחר מיקום...</option>';
-      _showLocationWarning('לא ניתן לטעון מיקומים מ-Google. ניתן להזין ידנית.');
-      _applyLocationFallback(select, manual, selectLocationId);
-      return;
-    }
-
-    if (data.locations.length === 0) {
-      select.innerHTML = '<option value="">בחר מיקום...</option>';
-      _showLocationWarning('לא נמצאו מיקומים בחשבון Google Business.');
-      _applyLocationFallback(select, manual, selectLocationId);
-      return;
-    }
-
-    // Keep the first "choose" option, add locations
-    select.innerHTML = '<option value="">בחר מיקום...</option>';
-    data.locations.forEach(loc => {
-      const opt = document.createElement('option');
-      opt.value = loc.name || loc.id;
-      const title = loc.title || loc.name || loc.id;
-      const address = loc.address || '';
-      opt.textContent = address ? `${title} — ${address}` : title;
-      select.appendChild(opt);
-    });
-
-    // Apply the location selection now that options are loaded
-    if (selectLocationId) {
-      const optionExists = Array.from(select.options).some(o => o.value === selectLocationId);
-      if (optionExists) {
-        select.value = selectLocationId;
-        manual.value = '';
-        manual.classList.add('hidden');
-      } else {
-        select.value = '';
-        manual.value = selectLocationId;
-        manual.classList.remove('hidden');
-        _showLocationWarning('המיקום שנבחר לא נמצא ברשימת המיקומים הזמינים.');
-      }
-    }
-  } catch (e) {
-    console.error('Failed to load GBP locations:', e);
-    if (requestId === _locationRequestId) {
-      _showLocationWarning('שגיאה בטעינת מיקומים. ניתן להזין ידנית.');
-      _applyLocationFallback(select, manual, selectLocationId);
-    }
-  } finally {
-    if (requestId === _locationRequestId) {
-      _setLocationLoading(false);
-    }
-  }
-}
-
-function refreshGbpLocations() {
-  const select = document.getElementById('form-google-location-id');
-  const currentValue = select.value ||
-    document.getElementById('form-google-location-id-manual').value.trim();
-  loadGbpLocations(currentValue, true);
-}
-
-function _applyLocationFallback(select, manual, locationId) {
-  // If fetch failed but we have a location value, show it in the manual field
-  // so the user doesn't lose the value.
-  if (locationId) {
-    select.value = '';
-    manual.value = locationId;
-    manual.classList.remove('hidden');
-  }
-}
+// GBP location picker was removed — location is set via GBP_DEFAULT_LOCATION_ID env var.
+// Keep stubs so any stray callers don't crash.
+function loadGbpLocations() {}
+function refreshGbpLocations() {}
 
 function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'FEED',
                          publishAt = '', caption = '', captionIg = '', captionFb = '',
@@ -774,7 +660,6 @@ function resetPostForm({ title, rowNumber = '', network = 'IG+FB', postType = 'F
 
 // ─── Create Post ─────────────────────────────────────────────
 function openCreateModal() {
-  loadGbpLocations('');
   resetPostForm({ title: 'פוסט חדש' });
 }
 
@@ -793,7 +678,6 @@ function openEditModal(rowNumber) {
     }
   }
 
-  loadGbpLocations(post.google_location_id || '');
   resetPostForm({
     title: 'עריכת פוסט',
     rowNumber,
@@ -822,7 +706,6 @@ function duplicatePost(rowNumber) {
   const post = posts.find(p => p._row === rowNumber);
   if (!post) return;
 
-  loadGbpLocations(post.google_location_id || '');
   resetPostForm({
     title: 'שכפול פוסט',
     network: post.network || 'IG+FB',
@@ -906,10 +789,7 @@ async function savePost() {
     showToast('יש לבחור קובץ מדיה', 'error');
     return;
   }
-  if (hasGBP && !googleLocationId) {
-    showToast('יש לבחור מיקום Google עבור GBP', 'error');
-    return;
-  }
+  // GBP location_id validated server-side (env var fallback)
   if (hasGBP && data.cta_type && !data.cta_url) {
     showToast('יש להזין כתובת URL עבור CTA', 'error');
     return;
@@ -1407,7 +1287,6 @@ function calendarToday() {
 }
 
 function openCreateModalWithDate(dateStr) {
-  loadGbpLocations('');
   resetPostForm({ title: 'פוסט חדש', publishAt: `${dateStr}T12:00` });
 }
 

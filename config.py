@@ -52,6 +52,7 @@ GOOGLE_SCOPES = [
 
 # ─── Google Business Profile — OAuth 2.0 ─────────────────
 GBP_ACCOUNT_ID = os.environ.get("GBP_ACCOUNT_ID", "")            # e.g. "accounts/123456789"
+GBP_DEFAULT_LOCATION_ID = os.environ.get("GBP_DEFAULT_LOCATION_ID", "")  # e.g. "locations/123456789"
 GBP_OAUTH_CLIENT_ID = os.environ.get("GBP_OAUTH_CLIENT_ID", "")
 GBP_OAUTH_CLIENT_SECRET = os.environ.get("GBP_OAUTH_CLIENT_SECRET", "")
 GBP_REFRESH_TOKEN = os.environ.get("GBP_REFRESH_TOKEN", "")

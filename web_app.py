@@ -358,9 +358,10 @@ def _validate_gbp_fields(data: dict) -> str | None:
     """Return an error message if GBP fields are invalid, or None if OK."""
     network = data.get(COL_NETWORK, "")
     if _network_includes_gbp(network):
-        location_id = data.get(COL_GOOGLE_LOCATION_ID, "").strip()
+        from config import GBP_DEFAULT_LOCATION_ID
+        location_id = data.get(COL_GOOGLE_LOCATION_ID, "").strip() or GBP_DEFAULT_LOCATION_ID
         if not location_id:
-            return "google_location_id is required when GBP is selected"
+            return "google_location_id is required when GBP is selected (set in form or GBP_DEFAULT_LOCATION_ID env var)"
     return None
 
 

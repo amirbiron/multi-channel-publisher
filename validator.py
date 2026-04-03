@@ -567,12 +567,13 @@ class RowValidator:
     def _validate_gbp(self, n: dict) -> ChannelValidationResult:
         issues: list[ValidationIssue] = []
 
-        # google_location_id is required
-        location_id = n.get(COL_GOOGLE_LOCATION_ID)
+        # google_location_id: from row or env var
+        from config import GBP_DEFAULT_LOCATION_ID
+        location_id = n.get(COL_GOOGLE_LOCATION_ID) or GBP_DEFAULT_LOCATION_ID
         if not location_id:
             issues.append(ValidationIssue(
                 code=ErrorCode.GBP_LOCATION_MISSING,
-                message="Missing google_location_id (required for GBP)",
+                message="Missing google_location_id (set in row or GBP_DEFAULT_LOCATION_ID env var)",
                 severity="CHANNEL_BLOCK",
                 field=COL_GOOGLE_LOCATION_ID,
                 channel="GBP",

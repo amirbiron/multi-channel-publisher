@@ -132,7 +132,7 @@ class LinkedInOAuthManager:
             # Transient server errors (5xx) should propagate so the
             # caller can retry later without permanently locking into
             # the wrong mode.
-            is_auth_error = exc.status_code in (400, 401)
+            is_auth_error = exc.status_code in (400, 401, 403)
             if self._direct_mode is None and is_auth_error:
                 logger.info(
                     "LinkedIn refresh token flow failed (%s) — using "

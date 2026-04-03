@@ -32,6 +32,14 @@ class FacebookChannel(BaseChannel):
         return errors
 
     def publish(self, post_data: dict) -> PublishResult:
+        from config import FB_PAGE_ID, FB_PAGE_ACCESS_TOKEN
+
+        if not FB_PAGE_ID or not FB_PAGE_ACCESS_TOKEN:
+            return self._make_result(
+                success=False, error_code="missing_credentials",
+                error_message="Facebook credentials not configured (FB_PAGE_ID, FB_PAGE_ACCESS_TOKEN)",
+            )
+
         from meta_publish import fb_publish_feed
 
         caption = self.get_caption(post_data)

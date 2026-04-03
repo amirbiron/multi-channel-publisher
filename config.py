@@ -20,12 +20,12 @@ SHEET_NAME = os.environ.get("SHEET_NAME", "Sheet1")
 META_API_VERSION = os.environ.get("META_API_VERSION", "v21.0")
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
-IG_USER_ID = os.environ["IG_USER_ID"]
-FB_PAGE_ID = os.environ["FB_PAGE_ID"]
+IG_USER_ID = os.environ.get("IG_USER_ID", "")
+FB_PAGE_ID = os.environ.get("FB_PAGE_ID", "")
 
 # טוקנים — אפשר להשתמש באותו טוקן אם יש לו הרשאות לשניהם
-IG_ACCESS_TOKEN = os.environ["IG_ACCESS_TOKEN"]
-FB_PAGE_ACCESS_TOKEN = os.environ["FB_PAGE_ACCESS_TOKEN"]
+IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
+FB_PAGE_ACCESS_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN", "")
 
 # ─── Cloudinary ──────────────────────────────────────────────
 # אפשרות 1 (מועדפת): CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME

@@ -32,6 +32,14 @@ class InstagramChannel(BaseChannel):
         return errors
 
     def publish(self, post_data: dict) -> PublishResult:
+        from config import IG_USER_ID, IG_ACCESS_TOKEN
+
+        if not IG_USER_ID or not IG_ACCESS_TOKEN:
+            return self._make_result(
+                success=False, error_code="missing_credentials",
+                error_message="Instagram credentials not configured (IG_USER_ID, IG_ACCESS_TOKEN)",
+            )
+
         from meta_publish import ig_publish_feed, ig_publish_carousel
 
         caption = self.get_caption(post_data)

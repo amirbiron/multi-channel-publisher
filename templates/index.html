@@ -353,16 +353,9 @@
           </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">LinkedIn Author <span class="form-required">*</span></label>
-          <select class="form-select" id="form-li-author-type" onchange="onLiAuthorTypeChange()">
-            <option value="person">פרופיל אישי (Person)</option>
-            <option value="organization">דף ארגוני (Organization)</option>
-          </select>
-          <input type="text" class="form-input mt-sm" id="form-li-author-urn"
-                 placeholder="urn:li:person:xxxxxxxxx" dir="ltr">
-          <div class="form-hint mt-sm">הזן את ה-URN המלא, למשל: urn:li:person:ABC123 או urn:li:organization:12345</div>
-        </div>
+        <!-- LinkedIn Author URN is set via LI_AUTHOR_URN env var -->
+        <input type="hidden" id="form-li-author-urn">
+        <input type="hidden" id="form-li-author-type" value="person">
       </div>
 
       <div class="form-group">

@@ -37,10 +37,11 @@ class LinkedInChannel(BaseChannel):
     def validate(self, post_data: dict) -> list[str]:
         errors: list[str] = []
 
-        # Author URN is required (personal profile or organization page)
-        author_urn = post_data.get(COL_LI_AUTHOR_URN, "")
+        # Author URN: from spreadsheet row, or fall back to env var
+        from config import LI_AUTHOR_URN
+        author_urn = post_data.get(COL_LI_AUTHOR_URN, "") or LI_AUTHOR_URN
         if not author_urn:
-            errors.append("Missing li_author_urn (required for LinkedIn)")
+            errors.append("Missing li_author_urn (set in row or LI_AUTHOR_URN env var)")
         elif not LI_URN_PATTERN.match(author_urn):
             errors.append(
                 f"Invalid li_author_urn format: '{author_urn}'. "
@@ -86,7 +87,8 @@ class LinkedInChannel(BaseChannel):
     # -- publishing ---------------------------------------------------
 
     def publish(self, post_data: dict) -> PublishResult:
-        author_urn = post_data[COL_LI_AUTHOR_URN]
+        from config import LI_AUTHOR_URN
+        author_urn = post_data.get(COL_LI_AUTHOR_URN) or LI_AUTHOR_URN
         caption = self.get_caption(post_data)
         cloud_urls: list[str] = post_data.get("cloud_urls", [])
         mime_types: list[str] = post_data.get("mime_types", [])

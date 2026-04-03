@@ -618,12 +618,13 @@ class RowValidator:
     def _validate_li(self, n: dict) -> ChannelValidationResult:
         issues: list[ValidationIssue] = []
 
-        # Author URN is required
-        author_urn = n.get(COL_LI_AUTHOR_URN)
+        # Author URN: from row, or fall back to env var
+        from config import LI_AUTHOR_URN
+        author_urn = n.get(COL_LI_AUTHOR_URN) or LI_AUTHOR_URN
         if not author_urn:
             issues.append(ValidationIssue(
                 code=ErrorCode.LI_AUTHOR_URN_MISSING,
-                message="Missing li_author_urn (required for LinkedIn)",
+                message="Missing li_author_urn (set in row or LI_AUTHOR_URN env var)",
                 severity="CHANNEL_BLOCK",
                 field=COL_LI_AUTHOR_URN,
                 channel="LI",
